@@ -33,10 +33,12 @@ class _ExpenseListScreenState extends State<ExpenseListScreen> {
                   var data = doc.data() as Map<String, dynamic>;
                   return Expense(
                     id: doc.id,
-                    date: data['date'] ?? 'Unknown Date',
+                    date: (data['date'] as Timestamp).toDate(),
                     description: data['description'] ?? 'Unknown',
-                    amount: data['amount'] ?? '0.00',
-                    category: data['category'],
+                    amount: (data['amount'] as num).toDouble(),
+                    category: data['category'] ?? 'Uncategorized',
+                    type: data['type'] ?? 'Expense',
+                    currency: data['currency'] ?? 'USD',
                   );
                 }).toList();
 

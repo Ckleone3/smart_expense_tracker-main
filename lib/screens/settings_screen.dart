@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:smart_expense_tracker/screens/CurrencySettingsScreen.dart';
 import 'package:smart_expense_tracker/screens/category_screen.dart';
 import 'package:smart_expense_tracker/keyword_settings_screen.dart';
 import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
+import 'package:smart_expense_tracker/screens/subscription_screen.dart';
+
+import '../services/storage/storage_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -49,6 +53,28 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const TutorialScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.workspace_premium),
+            title: const Text('Subscription'),
+            subtitle: const Text('Manage your subscription plan'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.storage),
+            title: const Text('Active Storage'),
+            subtitle: Text(
+              context.watch<StorageService>()
+                  .currentStorageType
+                  .toString()
+                  .split('.')
+                  .last
+                  .toUpperCase(),
+              style: Theme.of(context).textTheme.bodyLarge,
             ),
           ),
         ],

@@ -3,80 +3,82 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
+import 'package:smart_expense_tracker/services/subscription_service.dart';
+import 'package:smart_expense_tracker/services/sms_service.dart';
+import 'package:smart_expense_tracker/screens/auth_screens.dart';
 import 'package:smart_expense_tracker/screens/categorized_screen.dart';
 import 'package:smart_expense_tracker/screens/uncategorized_screen.dart';
 import 'package:smart_expense_tracker/screens/reports_screen.dart';
 import 'package:smart_expense_tracker/screens/settings_screen.dart';
-import 'package:smart_expense_tracker/services/sms_service.dart';
-import 'package:smart_expense_tracker/screens/auth_screens.dart';
+import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'firebase_options.dart';
-import 'screens/tutorial_screen.dart';
+import 'package:smart_expense_tracker/widgets/custom_widgets.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
-void main() async {
+import 'firebase_options.dart';
+
+// <-- Import your centralized theme
+import 'services/storage/storage_service.dart';
+import 'theme.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
+
+  // Send uncaught Flutter errors to Crashlytics
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+  // Capture errors outside the Flutter framework
+  runZonedGuarded<Future<void>>(() async {
+    runApp(const MyApp());
+  }, (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+  });
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Provider<SmsService>(
-      create: (_) => SmsService(),
-      child: MaterialApp(
-        title: 'Smart Expense Tracker',
-        theme: ThemeData(
-          primarySwatch: Colors.blue,
-          brightness: Brightness.light,
-          useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.blue,
-            brightness: Brightness.light,
-          ),
-          appBarTheme: const AppBarTheme(
-            elevation: 2,
-            centerTitle: true,
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-          ),
-          cardTheme: CardTheme(
-            elevation: 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
+Widget build(BuildContext context) {
+  return MultiProvider(
+    providers: [
+      Provider<SmsService>(create: (_) => SmsService()),
+      ChangeNotifierProvider<SubscriptionService>(
+        create: (_) => SubscriptionService(),
+      ),
+      ChangeNotifierProvider<StorageService>(
+        create: (context) => StorageService(
+          subscriptionService: context.read<SubscriptionService>(),
         ),
-        home: StreamBuilder<User?>(
-          stream: FirebaseAuth.instance.authStateChanges(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasData) {
-              return const HomeScreen();
-            }
-            return const WelcomeScreen();
-          },
-        ),
-        routes: {
-          '/tutorial': (context) => TutorialScreen(),
+      ),
+    ],
+    child: MaterialApp(
+      title: 'Smart Expense Tracker',
+      theme: AppTheme.theme,
+      themeMode: ThemeMode.system,
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasData) {
+            return const HomeScreen();
+          }
+          return const WelcomeScreen();
         },
       ),
-    );
-  }
+      routes: {
+        '/tutorial': (context) => const TutorialScreen(),
+      },
+    ),
+  );
+}
+
 }
 
 class HomeScreen extends StatefulWidget {
@@ -101,7 +103,21 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _smsService = Provider.of<SmsService>(context, listen: false);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // First-launch check
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+      if (!hasSeenOnboarding) {
+        await prefs.setBool('hasSeenOnboarding', true);
+        // show tutorial screen on first launch
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const TutorialScreen()),
+        );
+      }
+
+      // then do your normal SMS sync
       _initializeServiceAndSync();
     });
   }
@@ -123,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Stored $newMessages new SMS messages'),
-            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -131,7 +146,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error during initial SMS sync: $e'),
-          behavior: SnackBarBehavior.floating,
         ),
       );
     } finally {
@@ -162,16 +176,15 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context) {
         return AlertDialog(
           title: const Text('Fetch SMS Transactions'),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 8),
-                _buildDialogButton(
-                  context: context,
+
+                // Select Day
+                DialogButton(
                   icon: Icons.calendar_today,
                   label: 'Select Day',
                   onPressed: () async {
@@ -182,13 +195,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       lastDate: DateTime.now(),
                     );
                     if (selectedDate != null) {
+                      Navigator.pop(context);
                       _fetchSms('day', selectedDate);
                     }
                   },
                 ),
+
                 const SizedBox(height: 12),
-                _buildDialogButton(
-                  context: context,
+
+                // Select Date Range
+                DialogButton(
                   icon: Icons.date_range,
                   label: 'Select Date Range',
                   onPressed: () async {
@@ -207,14 +223,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         lastDate: DateTime.now(),
                       );
                       if (endDate != null) {
+                        Navigator.pop(context);
                         _fetchSms('range', startDate, rangeEnd: endDate);
                       }
                     }
                   },
                 ),
+
                 const SizedBox(height: 12),
-                _buildDialogButton(
-                  context: context,
+
+                // Select Month
+                DialogButton(
                   icon: Icons.calendar_month,
                   label: 'Select Month',
                   onPressed: () => _showMonthYearPicker(context),
@@ -233,7 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildDialogButton({
+  ElevatedButton _buildDialogButton({
     required BuildContext context,
     required IconData icon,
     required String label,
@@ -382,14 +401,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Retrieved $parsedCount SMS transactions from store'),
-            behavior: SnackBarBehavior.floating,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('No matching SMS transactions found for this date'),
-            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -400,7 +417,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error fetching transactions: $e'),
-            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -737,31 +753,29 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.account_balance_wallet, size: 24),
-            SizedBox(width: 8),
-            Text('Smart Expense Tracker'),
-          ],
-        ),
-        centerTitle: true,
-        elevation: 2,
+      appBar: SmartAppBar(
+        title: 'Smart Expense Tracker',
         actions: [
           PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More options',
             onSelected: (value) {
-              if (value == 'settings') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                );
-              } else if (value == 'logout') {
-                _handleLogout(context);
-              } else if (value == 'fetch') {
-                _showFetchOptions(context);
-              } else if (value == 'add') {
-                _addManualTransaction(context);
+              switch (value) {
+                case 'fetch':
+                  _showFetchOptions(context);
+                  break;
+                case 'add':
+                  _addManualTransaction(context);
+                  break;
+                case 'settings':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                  break;
+                case 'logout':
+                  _handleLogout(context);
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -806,45 +820,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ],
-            icon: const Icon(Icons.more_vert),
-            tooltip: 'More options',
           ),
         ],
       ),
       body: Stack(
         children: [
           _screens[_selectedIndex],
-          if (_isFetching)
-            Container(
-              color: Colors.black.withOpacity(0.3),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 10,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 12),
-                      Text(
-                        'Syncing SMS messages...',
-                        style: TextStyle(fontSize: 16),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -852,17 +833,14 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.list_alt),
             label: 'Uncategorized',
-            tooltip: 'View uncategorized transactions',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.category),
             label: 'Categorized',
-            tooltip: 'View categorized transactions',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.bar_chart),
             label: 'Reports',
-            tooltip: 'View expense reports',
           ),
         ],
         currentIndex: _selectedIndex,
@@ -870,8 +848,7 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedItemColor: Theme.of(context).colorScheme.primary,
         unselectedItemColor: Colors.grey.shade600,
         type: BottomNavigationBarType.fixed,
-        elevation: 12,
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal),
         showUnselectedLabels: true,

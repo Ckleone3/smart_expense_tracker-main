@@ -39,18 +39,26 @@ A comprehensive mobile application built with Flutter for tracking expenses and 
 - Category management
 - Tutorial access
 
-### 7. Storage Options
+### 7. Subscription Management
+- Free and Premium tier options
+- Seamless upgrade/downgrade functionality
+- Premium features unlocking
+- Subscription status tracking
+
+### 8. Storage Options
 #### Cloud Storage (Premium)
 - Firebase Firestore integration
 - Real-time data synchronization
 - Cross-device access
 - Secure data backup
+- Automatic data migration between storage types
 
 #### Local Storage (Free)
 - Offline access
 - Device-specific storage
 - Data privacy
 - No internet dependency
+- Hive-based local database
 
 ## Technical Implementation
 
@@ -68,6 +76,7 @@ A comprehensive mobile application built with Flutter for tracking expenses and 
 lib/
 ├── main.dart
 ├── models/
+│   └── expense.dart
 ├── screens/
 │   ├── auth_screens.dart
 │   ├── categorized_screen.dart
@@ -76,9 +85,17 @@ lib/
 │   ├── reports_screen.dart
 │   ├── settings_screen.dart
 │   ├── sms_filter_screen.dart
+│   ├── subscription_screen.dart
 │   └── tutorial_screen.dart
 └── services/
-    └── sms_service.dart
+    ├── subscription_service.dart
+    ├── sms_service.dart
+    └── storage/
+        ├── storage_service.dart
+        ├── storage_interface.dart
+        ├── storage_migration_service.dart
+        ├── local_storage.dart
+        └── cloud_storage.dart
 ```
 
 ## Getting Started
