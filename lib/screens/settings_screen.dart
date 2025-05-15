@@ -1,0 +1,58 @@
+import 'package:flutter/material.dart';
+import 'package:smart_expense_tracker/screens/CurrencySettingsScreen.dart';
+import 'package:smart_expense_tracker/screens/category_screen.dart';
+import 'package:smart_expense_tracker/keyword_settings_screen.dart';
+import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
+
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings'),
+      ),
+      body: ListView(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.category),
+            title: const Text('Manage Categories'),
+            subtitle: const Text('Add or edit categories and subcategories'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CategoryScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.key),
+            title: const Text('Manage SMS Keywords'),
+            subtitle: const Text('Set keywords to fetch transactions'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const KeywordSettingsScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.monetization_on),
+            title: const Text('Manage Currency'),
+            subtitle: const Text('Set your preferred currency'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CurrencySettingsScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.help_outline),
+            title: const Text('App Tutorial'),
+            subtitle: const Text('Learn how to use the app'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TutorialScreen()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

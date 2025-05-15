@@ -1,0 +1,22 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "smart-expense-tracker-c2236",
+          "appId": "1:886469902641:android:c3e828a2d3f04689d03010",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "smart-expense-tracker-c2236",
+          "configurations": {
+            "android": "1:886469902641:android:c3e828a2d3f04689d03010",
+            "ios": "1:886469902641:ios:b25f230f09a3954ad03010"
+          }
+        }
+      }
+    }
+  }
+}

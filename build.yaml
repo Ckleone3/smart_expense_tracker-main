@@ -1,0 +1,7 @@
+targets:
+  $default:
+    builders:
+      hive_generator|hive_builder:
+        enabled: true
+        generate_for:
+          - lib/services/sms_service.dart

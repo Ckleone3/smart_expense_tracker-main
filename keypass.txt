@@ -1,0 +1,1 @@
+keytool -list -v -alias smart_sms_tracker -keystore "C:\src\flutter\my-release-key.jks" -storepass Kiplingz@$3 -keypass Kiplingz@$3

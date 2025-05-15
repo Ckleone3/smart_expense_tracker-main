@@ -1,0 +1,1 @@
+D:\AppDev\New folder\Flutter\smart_expense_tracker-main\smart_expense_tracker-main\build\app\intermediates\cxx\Debug\6i5fe6l6\obj\arm64-v8a

@@ -1,0 +1,2 @@
+D:/AppDev/New folder/Flutter/smart_expense_tracker-main/smart_expense_tracker-main/android/app/.cxx/RelWithDebInfo/2m56vl4p/armeabi-v7a/CMakeFiles/edit_cache.dir
+D:/AppDev/New folder/Flutter/smart_expense_tracker-main/smart_expense_tracker-main/android/app/.cxx/RelWithDebInfo/2m56vl4p/armeabi-v7a/CMakeFiles/rebuild_cache.dir
