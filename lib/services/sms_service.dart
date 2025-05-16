@@ -1,3 +1,5 @@
+// ignore_for_file: depend_on_referenced_packages
+
 import 'dart:async';
 import 'dart:developer';
 import 'dart:convert'; // For MD5 hashing
@@ -9,6 +11,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart' as smsInbox;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // for trial
+import 'package:smart_expense_tracker/services/subscription_service.dart';
 
 part 'sms_service.g.dart';
 
@@ -56,6 +60,7 @@ class Transaction extends HiveObject {
 class SmsService {
   final smsInbox.SmsQuery _smsQuery = smsInbox.SmsQuery();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final SubscriptionService _subscriptionService;
   List<String> _cachedKeywords = [];
   bool _keywordsLoaded = false;
   late Box<Transaction> _transactionBox;
@@ -97,7 +102,11 @@ class SmsService {
   static const String _lastSyncKey = 'lastSyncTimestamp';
   static const int _batchSize = 500;
 
-  SmsService() {
+  // ① Expose the box so other widgets/services can read directly:
+  Box<Transaction> get transactionBox => _transactionBox;
+
+  SmsService({SubscriptionService? subscriptionService})
+      : _subscriptionService = subscriptionService ?? SubscriptionService() {
     _loadKeywords();
   }
 
@@ -432,7 +441,7 @@ class SmsService {
 
     // 5. Parse transactions with enhanced logic from Code 2
     final transactions = allMessages
-        .map((t) => _parseTransactionEnhanced(
+        .map((t) => parseTransactionEnhanced(
             t.rawSms, DateTime.parse(t.date), t.transactionId))
         .where((t) => t != null)
         .where((t) => _cachedKeywords
@@ -450,7 +459,7 @@ class SmsService {
     };
   }
 
-  Transaction? _parseTransactionEnhanced(
+  Transaction? parseTransactionEnhanced(
       String body, DateTime msgDate, String originalTransactionId) {
     log('Parsing SMS: body=$body');
 
@@ -611,9 +620,23 @@ class SmsService {
     );
   }
 
+  /// Returns true if within a 7-day trial window.
+  Future<bool> _isInTrial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final startStr = prefs.getString('trial_start');
+    if (startStr == null) return false;
+    final start = DateTime.parse(startStr);
+    return DateTime.now().difference(start) < const Duration(days: 7);
+  }
+
   // Enhanced Firestore sync function with categoryId and timestamp
   Future<void> _syncWithFirestoreEnhanced(
       List<Transaction?> transactions) async {
+    // only sync to cloud if user is premium OR in trial
+    final isPremium = await _subscriptionService.hasPremiumFeatures();
+    final inTrial = await _isInTrial(); // if you implemented the trial logic
+    if (!isPremium && !inTrial) return;
+
     final userId = FirebaseAuth.instance.currentUser?.uid;
     if (userId == null) return;
 

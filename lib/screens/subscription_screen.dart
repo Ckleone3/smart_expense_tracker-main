@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../services/subscription_service.dart';
 
 class SubscriptionScreen extends StatelessWidget {
-  const SubscriptionScreen({Key? key}) : super(key: key);
+  const SubscriptionScreen({super.key});
 
   @override
   Widget build(BuildContext context) {

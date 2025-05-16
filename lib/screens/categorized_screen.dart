@@ -210,8 +210,8 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     );
   }
 
-  void _showTransactionDetails(
-      BuildContext context, Map<String, dynamic> transactionData, String userId) {
+  void _showTransactionDetails(BuildContext context,
+      Map<String, dynamic> transactionData, String userId) {
     String formattedDate;
     try {
       final dateTime = DateTime.parse(transactionData['date']);
@@ -247,14 +247,16 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                       .collection('users')
                       .doc(userId)
                       .collection('allocations')
-                      .where('transactionId', isEqualTo: transactionData['transactionId'])
+                      .where('transactionId',
+                          isEqualTo: transactionData['transactionId'])
                       .get(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const CircularProgressIndicator();
                     }
                     if (snapshot.hasError) {
-                      return Text('Error loading allocations: ${snapshot.error}');
+                      return Text(
+                          'Error loading allocations: ${snapshot.error}');
                     }
                     if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                       return const Text('No allocations found.');
@@ -266,14 +268,16 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                         const Text('Allocations:',
                             style: TextStyle(fontWeight: FontWeight.bold)),
                         ...allocations.map((alloc) {
-                          final allocData = alloc.data() as Map<String, dynamic>;
+                          final allocData =
+                              alloc.data() as Map<String, dynamic>;
                           return ListTile(
                             title: Text(allocData['categoryId']),
                             subtitle: Text(
                                 '${transactionData['currency']} ${(allocData['amount'] as num?)?.toDouble().toStringAsFixed(2) ?? '0.00'}'),
                             trailing: IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => _deleteAllocation(alloc.id, userId),
+                              onPressed: () =>
+                                  _deleteAllocation(alloc.id, userId),
                             ),
                           );
                         }),
@@ -368,6 +372,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
             .collection('transactions')
             .where('categoryId', isNotEqualTo: null)
             .where('categoryId', isNotEqualTo: 'Uncategorized')
+            .orderBy('categoryId')
             .orderBy('date', descending: true)
             .snapshots(),
         builder: (context, transactionSnapshot) {
@@ -379,37 +384,46 @@ class _CategorizedScreenState extends State<CategorizedScreen>
           }
 
           final transactions = transactionSnapshot.data!.docs;
+          final currency = _cachedData!['currency'] as String;
           final incomeCategories =
               _cachedData!['incomeCategories'] as List<String>;
           final expenseCategories =
               _cachedData!['expenseCategories'] as List<String>;
           final allAllocations =
               _cachedData!['allocations'] as List<Map<String, dynamic>>;
-          final currency = _cachedData!['currency'] as String;
 
+          // Group transactions by category and type
           final groupedTransactions = {
             'Income': <String, List<QueryDocumentSnapshot>>{},
             'Expense': <String, List<QueryDocumentSnapshot>>{},
           };
-          double totalIncome = 0.0, totalExpense = 0.0;
+
+          double totalIncome = 0.0;
+          double totalExpense = 0.0;
           final expenseTotals = <String, double>{};
           final allocatedAmounts = <String, double>{};
 
+          // Calculate allocated amounts
           for (var allocation in allAllocations) {
             allocatedAmounts[allocation['categoryId']] =
                 (allocatedAmounts[allocation['categoryId']] ?? 0.0) +
                     allocation['amount'];
           }
+
+          // Initialize category maps
           for (var category in incomeCategories) {
             groupedTransactions['Income']![category] = [];
           }
           for (var category in expenseCategories) {
             groupedTransactions['Expense']![category] = [];
           }
+
+          // Group transactions and calculate totals
           for (var transaction in transactions) {
             final type = transaction['type'] as String? ?? 'Unknown';
             final category = transaction['categoryId'] as String?;
             final amount = transaction['amount'] as double? ?? 0.0;
+
             if (category != null) {
               if (type == 'Income') {
                 totalIncome += amount;
@@ -425,88 +439,155 @@ class _CategorizedScreenState extends State<CategorizedScreen>
             }
           }
 
-          final balances = expenseTotals.map((category, spent) => MapEntry(
-              category, (allocatedAmounts[category] ?? 0.0) - spent));
+          // Calculate balances for each expense category
+          final balances = expenseTotals.map((category, spent) =>
+              MapEntry(category, (allocatedAmounts[category] ?? 0.0) - spent));
 
+          // Group allocations by transaction
           final groupedAllocations = <String, List<Map<String, dynamic>>>{};
           for (var allocation in allAllocations) {
             groupedAllocations[allocation['transactionId']] ??= [];
             groupedAllocations[allocation['transactionId']]!.add(allocation);
           }
 
-          return Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Card(
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Summary',
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              return Column(
+                children: [
+                  // Summary card with responsive width
+                  Container(
+                    width: constraints.maxWidth,
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Card(
+                      margin: const EdgeInsets.symmetric(vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
                           children: [
-                            Text(
-                                'Income: $currency ${totalIncome.toStringAsFixed(2)}',
-                                style: const TextStyle(color: Colors.green)),
-                            Text(
-                                'Expenses: $currency ${totalExpense.toStringAsFixed(2)}',
-                                style: const TextStyle(color: Colors.red)),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Income',
+                                          style: TextStyle(
+                                              color: Colors.grey,
+                                              fontSize: 12)),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$currency ${totalIncome.toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          color: Colors.green,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      const Text('Expenses',
+                                          style: TextStyle(
+                                              color: Colors.grey,
+                                              fontSize: 12)),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '$currency ${totalExpense.toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          color: Colors.red,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 24),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Balance',
+                                    style: TextStyle(
+                                        color: Colors.grey, fontSize: 12)),
+                                Text(
+                                  '$currency ${(totalIncome - totalExpense).toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    color: totalIncome - totalExpense >= 0
+                                        ? Colors.blue
+                                        : Colors.orange,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Balance: $currency ${balances.values.fold<double>(0.0, (sum, b) => sum + b).toStringAsFixed(2)}',
-                          style: const TextStyle(
-                              color: Colors.blue, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  // Search TextField with responsive width
+                  Container(
+                    width: constraints.maxWidth,
+                    constraints: const BoxConstraints(maxWidth: 600),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        labelText: 'Search by category',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _onSearchChanged('');
+                                },
+                              )
+                            : null,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        isDense: true,
+                      ),
+                      style: const TextStyle(fontSize: 14),
+                      onChanged: _onSearchChanged,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Tab Content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildTransactionTab('Income',
+                            groupedTransactions['Income']!, currency, userId),
+                        _buildEnhancedExpenseTab(
+                            groupedTransactions['Expense']!,
+                            currency,
+                            userId,
+                            balances,
+                            allocatedAmounts),
+                        _buildAllocationsTab(
+                            groupedAllocations, currency, userId),
+                        _buildMasterExpenseTab(transactions, currency, userId),
+                        _buildMasterIncomeTab(transactions, currency, userId),
                       ],
                     ),
                   ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    labelText: 'Search by category',
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _searchController.clear();
-                        _onSearchChanged('');
-                      },
-                    ),
-                  ),
-                  onChanged: _onSearchChanged,
-                ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildTransactionTab('Income',
-                        groupedTransactions['Income']!, currency, userId),
-                    _buildEnhancedExpenseTab(groupedTransactions['Expense']!,
-                        currency, userId, balances, allocatedAmounts),
-                    _buildAllocationsTab(groupedAllocations, currency, userId),
-                    _buildMasterExpenseTab(transactions, currency, userId),
-                    _buildMasterIncomeTab(transactions, currency, userId),
-                  ],
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           );
         },
       ),
@@ -609,8 +690,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     final displayGroups = allCategories
         .where((category) =>
             category.toLowerCase().contains(_searchQuery.toLowerCase()))
-        .map((category) => MapEntry(
-            category,
+        .map((category) => MapEntry(category,
             groupedTransactions[category] ?? <QueryDocumentSnapshot>[]))
         .toList();
 
@@ -630,10 +710,11 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                   child: GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      childAspectRatio: 1.5,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount:
+                          MediaQuery.of(context).size.width < 600 ? 2 : 3,
+                      childAspectRatio:
+                          MediaQuery.of(context).size.width < 400 ? 1.2 : 1.5,
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
                     ),
@@ -654,26 +735,38 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                           child: Padding(
                             padding: const EdgeInsets.all(8.0),
                             child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(category,
                                     style: const TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 8),
-                                Text(
-                                    'Allocated: $currency ${allocated.toStringAsFixed(2)}',
-                                    style: const TextStyle(color: Colors.blue)),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
                                 const SizedBox(height: 4),
                                 Text(
                                     'Spent: $currency ${categoryTotal.toStringAsFixed(2)}',
-                                    style: const TextStyle(color: Colors.red)),
-                                const SizedBox(height: 4),
+                                    style: const TextStyle(
+                                        color: Colors.red, fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                Text(
+                                    'Allocated: $currency ${allocated.toStringAsFixed(2)}',
+                                    style: const TextStyle(
+                                        color: Colors.blue, fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
                                 Text(
                                     'Balance: $currency ${balance.toStringAsFixed(2)}',
                                     style: TextStyle(
                                         color: balance >= 0
                                             ? Colors.green
-                                            : Colors.orange)),
+                                            : Colors.orange,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
                               ],
                             ),
                           ),
@@ -755,6 +848,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     final date = transaction['date'] as String? ?? 'No date';
     final rawSms = transaction['rawSms'] as String? ?? 'No SMS data';
     final type = transaction['type'] as String? ?? 'Unknown';
+    final categoryId = transaction['categoryId'] as String? ?? 'Unknown';
 
     String formattedDate;
     try {
@@ -766,41 +860,62 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     }
 
     return ListTile(
-      title: Text(description),
-      subtitle: Text('$currency ${amount.toStringAsFixed(2)} • $formattedDate'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
+      leading: CircleAvatar(
+        backgroundColor: type == 'Income' ? Colors.green[100] : Colors.red[100],
+        child: Icon(
+          type == 'Income' ? Icons.arrow_downward : Icons.arrow_upward,
+          color: type == 'Income' ? Colors.green : Colors.red,
+          size: 16,
+        ),
+      ),
+      title: Text(
+        description,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (type == 'Income')
-            IconButton(
-              icon: const Icon(Icons.account_balance, color: Colors.blue),
-              onPressed: () => _showTransactionDetails(context, {
-                'amount': amount,
-                'date': date,
-                'description': description,
-                'rawSms': rawSms,
-                'currency': currency,
-                'transactionId': transactionId,
-                'type': type,
-              }, userId),
-              tooltip: 'View Allocations',
-            ),
-          IconButton(
-            icon: const Icon(Icons.delete, color: Colors.red),
-            onPressed: () => _deleteTransaction(transactionId, userId),
-            tooltip: 'Delete Transaction',
+          Text(
+            'Category: $categoryId',
+            style: const TextStyle(fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          Text(
+            'Date: $formattedDate',
+            style: const TextStyle(fontSize: 12),
           ),
         ],
       ),
-      onTap: () => _showTransactionDetails(context, {
-        'amount': amount,
-        'date': date,
-        'description': description,
-        'rawSms': rawSms,
-        'currency': currency,
-        'transactionId': transactionId,
-        'type': type,
-      }, userId),
+      isThreeLine: true,
+      dense: true,
+      trailing: SizedBox(
+        width: 90,
+        child: Text(
+          '$currency ${amount.toStringAsFixed(2)}',
+          style: TextStyle(
+            color: type == 'Income' ? Colors.green : Colors.red,
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+          ),
+          textAlign: TextAlign.end,
+        ),
+      ),
+      onTap: () => _showTransactionDetails(
+          context,
+          {
+            'amount': amount,
+            'date': date,
+            'description': description,
+            'rawSms': rawSms,
+            'currency': currency,
+            'transactionId': transactionId,
+            'type': type,
+            'categoryId': categoryId,
+          },
+          userId),
     );
   }
 
@@ -860,7 +975,8 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                           '$currency ${amount.toStringAsFixed(2)} • $formattedDate'),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _deleteAllocation(allocationId, userId),
+                        onPressed: () =>
+                            _deleteAllocation(allocationId, userId),
                       ),
                     );
                   }).toList(),
@@ -874,8 +990,8 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     );
   }
 
-  Widget _buildMasterExpenseTab(
-      List<QueryDocumentSnapshot> transactions, String currency, String userId) {
+  Widget _buildMasterExpenseTab(List<QueryDocumentSnapshot> transactions,
+      String currency, String userId) {
     final filteredTransactions = transactions.where((t) {
       final category = t['categoryId'] as String?;
       final type = t['type'] as String? ?? '';
@@ -905,7 +1021,8 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     final endIndex = (startIndex + _itemsPerPage) > filteredTransactions.length
         ? filteredTransactions.length
         : startIndex + _itemsPerPage;
-    final currentTransactions = filteredTransactions.sublist(startIndex, endIndex);
+    final currentTransactions =
+        filteredTransactions.sublist(startIndex, endIndex);
 
     return Column(
       children: [
@@ -957,52 +1074,89 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                     final transaction = currentTransactions[index];
                     final amount = transaction['amount'] as double? ?? 0.0;
                     final date = transaction['date'] as String? ?? 'No date';
-                    final categoryId = transaction['categoryId'] as String? ?? '';
-                    final description =
-                        transaction['description'] as String? ?? 'No description';
+                    final categoryId =
+                        transaction['categoryId'] as String? ?? '';
+                    final description = transaction['description'] as String? ??
+                        'No description';
 
                     String formattedDate;
                     try {
                       final dateTime = DateTime.parse(date);
-                      formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(dateTime);
+                      formattedDate =
+                          DateFormat('dd/MM/yyyy HH:mm').format(dateTime);
                     } catch (e) {
                       formattedDate = 'Invalid Date';
                       log('Failed to parse date "$date": $e');
                     }
 
                     return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      margin: const EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 8),
                       elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: Colors.red[100],
-                          child: const Icon(Icons.arrow_upward, color: Colors.red, size: 16),
+                          child: const Icon(Icons.arrow_upward,
+                              color: Colors.red, size: 18),
                         ),
-                        title: Text(description),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Category: $categoryId'),
-                            Text('Date: $formattedDate'),
-                          ],
-                        ),
-                        trailing: Text(
-                          '$currency ${amount.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.bold,
+                        title: Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            description,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.w500),
                           ),
                         ),
-                        onTap: () => _showTransactionDetails(context, {
-                          'amount': amount,
-                          'date': date,
-                          'description': description,
-                          'rawSms': transaction['rawSms'] as String? ?? 'No SMS data',
-                          'currency': currency,
-                          'transactionId': transaction.id,
-                          'type': transaction['type'] as String? ?? 'Expense',
-                        }, userId),
+                        subtitle: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Date: $formattedDate',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  Text(
+                                    'Category: $categoryId',
+                                    style: const TextStyle(fontSize: 12),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              '$currency ${amount.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                        isThreeLine: true,
+                        dense: true,
+                        onTap: () => _showTransactionDetails(
+                            context,
+                            {
+                              'amount': amount,
+                              'date': date,
+                              'description': description,
+                              'rawSms': transaction['rawSms'] as String? ??
+                                  'No SMS data',
+                              'currency': currency,
+                              'transactionId': transaction.id,
+                              'type':
+                                  transaction['type'] as String? ?? 'Expense',
+                            },
+                            userId),
                       ),
                     );
                   },
@@ -1013,8 +1167,8 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     );
   }
 
-  Widget _buildMasterIncomeTab(
-      List<QueryDocumentSnapshot> transactions, String currency, String userId) {
+  Widget _buildMasterIncomeTab(List<QueryDocumentSnapshot> transactions,
+      String currency, String userId) {
     final filteredTransactions = transactions.where((t) {
       final category = t['categoryId'] as String?;
       final type = t['type'] as String? ?? '';
@@ -1044,7 +1198,8 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     final endIndex = (startIndex + _itemsPerPage) > filteredTransactions.length
         ? filteredTransactions.length
         : startIndex + _itemsPerPage;
-    final currentTransactions = filteredTransactions.sublist(startIndex, endIndex);
+    final currentTransactions =
+        filteredTransactions.sublist(startIndex, endIndex);
 
     return Column(
       children: [
@@ -1096,52 +1251,72 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                     final transaction = currentTransactions[index];
                     final amount = transaction['amount'] as double? ?? 0.0;
                     final date = transaction['date'] as String? ?? 'No date';
-                    final categoryId = transaction['categoryId'] as String? ?? '';
-                    final description =
-                        transaction['description'] as String? ?? 'No description';
+                    final categoryId =
+                        transaction['categoryId'] as String? ?? '';
+                    final description = transaction['description'] as String? ??
+                        'No description';
 
                     String formattedDate;
                     try {
                       final dateTime = DateTime.parse(date);
-                      formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(dateTime);
+                      formattedDate =
+                          DateFormat('dd/MM/yyyy HH:mm').format(dateTime);
                     } catch (e) {
                       formattedDate = 'Invalid Date';
                       log('Failed to parse date "$date": $e');
                     }
 
                     return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                      margin: const EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 8),
                       elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: Colors.green[100],
-                          child: const Icon(Icons.arrow_downward, color: Colors.green, size: 16),
+                          child: const Icon(Icons.arrow_downward,
+                              color: Colors.green, size: 16),
                         ),
-                        title: Text(description),
+                        title: Text(description,
+                            maxLines: 2, overflow: TextOverflow.ellipsis),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Category: $categoryId'),
-                            Text('Date: $formattedDate'),
+                            Text('Category: $categoryId',
+                                style: const TextStyle(fontSize: 12)),
+                            Text('Date: $formattedDate',
+                                style: const TextStyle(fontSize: 12)),
                           ],
                         ),
-                        trailing: Text(
-                          '$currency ${amount.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
+                        isThreeLine: true,
+                        dense: true,
+                        trailing: SizedBox(
+                          width: 90,
+                          child: Text(
+                            '$currency ${amount.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                            textAlign: TextAlign.end,
                           ),
                         ),
-                        onTap: () => _showTransactionDetails(context, {
-                          'amount': amount,
-                          'date': date,
-                          'description': description,
-                          'rawSms': transaction['rawSms'] as String? ?? 'No SMS data',
-                          'currency': currency,
-                          'transactionId': transaction.id,
-                          'type': transaction['type'] as String? ?? 'Income',
-                        }, userId),
+                        onTap: () => _showTransactionDetails(
+                            context,
+                            {
+                              'amount': amount,
+                              'date': date,
+                              'description': description,
+                              'rawSms': transaction['rawSms'] as String? ??
+                                  'No SMS data',
+                              'currency': currency,
+                              'transactionId': transaction.id,
+                              'type':
+                                  transaction['type'] as String? ?? 'Income',
+                            },
+                            userId),
                       ),
                     );
                   },

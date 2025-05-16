@@ -73,4 +73,10 @@ class SubscriptionService extends ChangeNotifier {
       'active': false,
     });
   }
+
+  /// Returns true if the first event on the tierStream is premium
+  Future<bool> hasPremiumFeatures() async {
+    final tier = await tierStream().first;
+    return tier == SubscriptionTier.premium;
+  }
 }

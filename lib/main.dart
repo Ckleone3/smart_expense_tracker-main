@@ -19,8 +19,6 @@ import 'dart:async';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 import 'firebase_options.dart';
-
-// <-- Import your centralized theme
 import 'services/storage/storage_service.dart';
 import 'theme.dart';
 
@@ -28,10 +26,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Send uncaught Flutter errors to Crashlytics
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
-
-  // Capture errors outside the Flutter framework
   runZonedGuarded<Future<void>>(() async {
     runApp(const MyApp());
   }, (error, stack) {
@@ -43,42 +38,45 @@ class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-Widget build(BuildContext context) {
-  return MultiProvider(
-    providers: [
-      Provider<SmsService>(create: (_) => SmsService()),
-      ChangeNotifierProvider<SubscriptionService>(
-        create: (_) => SubscriptionService(),
-      ),
-      ChangeNotifierProvider<StorageService>(
-        create: (context) => StorageService(
-          subscriptionService: context.read<SubscriptionService>(),
+  Widget build(BuildContext context) {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<SubscriptionService>(
+          create: (_) => SubscriptionService(),
         ),
-      ),
-    ],
-    child: MaterialApp(
-      title: 'Smart Expense Tracker',
-      theme: AppTheme.theme,
-      themeMode: ThemeMode.system,
-      home: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasData) {
-            return const HomeScreen();
-          }
-          return const WelcomeScreen();
+        Provider<SmsService>(
+          create: (context) => SmsService(
+            subscriptionService: context.read<SubscriptionService>(),
+          ),
+        ),
+        ChangeNotifierProvider<StorageService>(
+          create: (context) => StorageService(
+            subscriptionService: context.read<SubscriptionService>(),
+          ),
+        ),
+      ],
+      child: MaterialApp(
+        title: 'Smart Expense Tracker',
+        theme: AppTheme.theme,
+        themeMode: ThemeMode.system,
+        home: StreamBuilder<User?>(
+          stream: FirebaseAuth.instance.authStateChanges(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasData) {
+              return const HomeScreen();
+            }
+            return const WelcomeScreen();
+          },
+        ),
+        routes: {
+          '/tutorial': (context) => const TutorialScreen(),
         },
       ),
-      routes: {
-        '/tutorial': (context) => const TutorialScreen(),
-      },
-    ),
-  );
-}
-
+    );
+  }
 }
 
 class HomeScreen extends StatefulWidget {
@@ -105,19 +103,76 @@ class _HomeScreenState extends State<HomeScreen> {
     _smsService = Provider.of<SmsService>(context, listen: false);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // First-launch check
       final prefs = await SharedPreferences.getInstance();
       final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+
       if (!hasSeenOnboarding) {
         await prefs.setBool('hasSeenOnboarding', true);
-        // show tutorial screen on first launch
-        Navigator.push(
+
+        await Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const TutorialScreen()),
         );
+
+        final startTrial = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Try Premium free for 7 days?'),
+            content: const Text(
+              'Get cloud sync, cross-device access, and advanced reports for 7 days.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('No, thanks'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Start Trial'),
+              ),
+            ],
+          ),
+        );
+
+        if (startTrial == true) {
+          await prefs.setString(
+            'trial_start',
+            DateTime.now().toIso8601String(),
+          );
+          await context.read<SubscriptionService>().upgradeToPremium();
+        }
       }
 
-      // then do your normal SMS sync
+      // After your existing onboarding/trial prompt block:
+
+// --- TRIAL EXPIRATION CHECK ---
+      final trialStr = prefs.getString('trial_start');
+      if (trialStr != null) {
+        final start = DateTime.parse(trialStr);
+        final elapsed = DateTime.now().difference(start);
+        if (elapsed >= const Duration(days: 7)) {
+          // Trial has ended!
+          await context.read<SubscriptionService>().downgradeToFree();
+          await prefs.remove('trial_start');
+          // Let the user know
+          showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Trial Ended'),
+              content: const Text(
+                'Your 7-day Premium trial has ended. You’re now on the Free plan.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                )
+              ],
+            ),
+          );
+        }
+      }
+
       _initializeServiceAndSync();
     });
   }
@@ -129,36 +184,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeServiceAndSync() async {
-    setState(() {
-      _isFetching = true;
-    });
+    setState(() => _isFetching = true);
     try {
       await _smsService.init();
       final newMessages = await _smsService.initializeSmsStore();
       if (newMessages > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Stored $newMessages new SMS messages'),
-          ),
+          SnackBar(content: Text('Stored $newMessages new SMS messages')),
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error during initial SMS sync: $e'),
-        ),
+        SnackBar(content: Text('Error during initial SMS sync: $e')),
       );
     } finally {
-      setState(() {
-        _isFetching = false;
-      });
+      setState(() => _isFetching = false);
     }
   }
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
   }
 
   void _handleLogout(BuildContext context) async {
@@ -173,82 +218,75 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showFetchOptions(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Fetch SMS Transactions'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 8),
-
-                // Select Day
-                DialogButton(
-                  icon: Icons.calendar_today,
-                  label: 'Select Day',
-                  onPressed: () async {
-                    final selectedDate = await showDatePicker(
+      builder: (context) => AlertDialog(
+        title: const Text('Fetch SMS Transactions'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              _buildDialogButton(
+                context: context,
+                icon: Icons.calendar_today,
+                label: 'Select Day',
+                onPressed: () async {
+                  final selectedDate = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime.now(),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (selectedDate != null) {
+                    Navigator.pop(context);
+                    _fetchSms('day', selectedDate);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildDialogButton(
+                context: context,
+                icon: Icons.date_range,
+                label: 'Select Date Range',
+                onPressed: () async {
+                  final startDate = await showDatePicker(
+                    context: context,
+                    initialDate:
+                        DateTime.now().subtract(const Duration(days: 7)),
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (startDate != null) {
+                    final endDate = await showDatePicker(
                       context: context,
                       initialDate: DateTime.now(),
-                      firstDate: DateTime(2020),
+                      firstDate: startDate,
                       lastDate: DateTime.now(),
                     );
-                    if (selectedDate != null) {
+                    if (endDate != null) {
                       Navigator.pop(context);
-                      _fetchSms('day', selectedDate);
+                      _fetchSms('range', startDate, rangeEnd: endDate);
                     }
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                // Select Date Range
-                DialogButton(
-                  icon: Icons.date_range,
-                  label: 'Select Date Range',
-                  onPressed: () async {
-                    final startDate = await showDatePicker(
-                      context: context,
-                      initialDate:
-                          DateTime.now().subtract(const Duration(days: 7)),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime.now(),
-                    );
-                    if (startDate != null) {
-                      final endDate = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime.now(),
-                        firstDate: startDate,
-                        lastDate: DateTime.now(),
-                      );
-                      if (endDate != null) {
-                        Navigator.pop(context);
-                        _fetchSms('range', startDate, rangeEnd: endDate);
-                      }
-                    }
-                  },
-                ),
-
-                const SizedBox(height: 12),
-
-                // Select Month
-                DialogButton(
-                  icon: Icons.calendar_month,
-                  label: 'Select Month',
-                  onPressed: () => _showMonthYearPicker(context),
-                ),
-              ],
-            ),
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              _buildDialogButton(
+                context: context,
+                icon: Icons.calendar_month,
+                label: 'Select Month',
+                onPressed: () => _showMonthYearPicker(context),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -273,9 +311,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showMonthYearPicker(BuildContext context) {
     final currentYear = DateTime.now().year;
-    final years =
-        List.generate(currentYear - 2019, (index) => currentYear - index);
-    final months = [
+    final years = List.generate(currentYear - 2019, (i) => currentYear - i);
+    final months = <String>[
       'January',
       'February',
       'March',
@@ -289,7 +326,6 @@ class _HomeScreenState extends State<HomeScreen> {
       'November',
       'December'
     ];
-
     int? selectedYear = currentYear;
     int? selectedMonth = DateTime.now().month;
 
@@ -305,78 +341,28 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const Text('Year', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: DropdownButton<int>(
-                  value: selectedYear,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: years
-                      .map((year) => DropdownMenuItem<int>(
-                            value: year,
-                            child: Text(year.toString()),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedYear = value;
-                    });
-                  },
-                  hint: const Text('Select Year'),
-                ),
-              ),
+              _yearDropdown(selectedYear, years, setState),
               const SizedBox(height: 16),
               const Text('Month',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: DropdownButton<int>(
-                  value: selectedMonth,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: months
-                      .asMap()
-                      .entries
-                      .map((entry) => DropdownMenuItem<int>(
-                            value: entry.key + 1,
-                            child: Text(entry.value),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedMonth = value;
-                    });
-                  },
-                  hint: const Text('Select Month'),
-                ),
-              ),
+              _monthDropdown(selectedMonth, months, setState),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel')),
             ElevatedButton.icon(
               icon: const Icon(Icons.download),
+              label: const Text('Fetch'),
               onPressed: () {
                 if (selectedYear != null && selectedMonth != null) {
-                  final selectedDate =
-                      DateTime(selectedYear!, selectedMonth!, 1);
+                  final date = DateTime(selectedYear, selectedMonth, 1);
                   Navigator.pop(context);
-                  _fetchSms('month', selectedDate);
+                  _fetchSms('month', date);
                 }
               },
-              label: const Text('Fetch'),
             ),
           ],
         ),
@@ -384,46 +370,58 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _yearDropdown(
+      int? selectedYear, List<int> years, StateSetter setState) {
+    return DropdownButton<int>(
+      value: selectedYear,
+      isExpanded: true,
+      underline: const SizedBox(),
+      items: years
+          .map((y) => DropdownMenuItem(value: y, child: Text('$y')))
+          .toList(),
+      onChanged: (v) => setState(() => selectedYear = v),
+    );
+  }
+
+  Widget _monthDropdown(
+      int? selectedMonth, List<String> months, StateSetter setState) {
+    return DropdownButton<int>(
+      value: selectedMonth,
+      isExpanded: true,
+      underline: const SizedBox(),
+      items: months
+          .asMap()
+          .entries
+          .map((e) => DropdownMenuItem(value: e.key + 1, child: Text(e.value)))
+          .toList(),
+      onChanged: (v) => setState(() => selectedMonth = v),
+    );
+  }
+
   void _fetchSms(String fetchType, DateTime referenceDate,
       {DateTime? rangeEnd}) async {
     Navigator.pop(context);
-    setState(() {
-      _isFetching = true;
-    });
+    setState(() => _isFetching = true);
     try {
-      final result = await _smsService.fetchTransactions(
-        fetchType,
-        referenceDate,
-        rangeEnd: rangeEnd,
+      final result = await _smsService
+          .fetchTransactions(fetchType, referenceDate, rangeEnd: rangeEnd);
+      final parsed = result['parsed']!;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(parsed > 0
+                ? 'Retrieved $parsed SMS transactions from store'
+                : 'No matching SMS transactions found for this date')),
       );
-      final parsedCount = result['parsed']!;
-      if (parsedCount > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Retrieved $parsedCount SMS transactions from store'),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No matching SMS transactions found for this date'),
-          ),
-        );
-      }
     } catch (e) {
       if (e.toString().contains('NO_KEYWORDS_AVAILABLE')) {
         _showNoKeywordsDialog(context);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error fetching transactions: $e'),
-          ),
+          SnackBar(content: Text('Error fetching transactions: $e')),
         );
       }
     } finally {
-      setState(() {
-        _isFetching = false;
-      });
+      setState(() => _isFetching = false);
     }
   }
 
@@ -438,9 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'To fetch SMS transactions, you need to set up keywords that identify your financial messages.',
-              style: TextStyle(fontSize: 16),
-            ),
+                'To fetch SMS transactions, you need to set up keywords.'),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -466,19 +462,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Later'),
-          ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Later')),
           ElevatedButton.icon(
             icon: const Icon(Icons.settings),
+            label: const Text('Go to Settings'),
             onPressed: () {
               Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()));
             },
-            label: const Text('Go to Settings'),
           ),
         ],
       ),
@@ -486,59 +479,52 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<List<String>> _fetchCategories(String type) async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) return [];
-    final snapshot = await FirebaseFirestore.instance
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return [];
+    final snap = await FirebaseFirestore.instance
         .collection('users')
-        .doc(userId)
+        .doc(uid)
         .collection('categories')
         .where('type', isEqualTo: type)
         .get();
-    return snapshot.docs.map((doc) => doc['name'] as String).toList();
+    return snap.docs.map((d) => d['name'] as String).toList();
   }
 
   Future<void> _allocateIncome(
-      String transactionId, double amount, String userId) async {
-    final expenseCategories = await FirebaseFirestore.instance
+      String txId, double amount, String userId) async {
+    final expCats = await FirebaseFirestore.instance
         .collection('users')
         .doc(userId)
         .collection('categories')
         .where('type', isEqualTo: 'Expense')
         .get();
-
-    for (var categoryDoc in expenseCategories.docs) {
-      final category = categoryDoc.data();
-      final double percentage =
-          (category['percentage'] as num?)?.toDouble() ?? 0;
-      final double allocatedAmount = (amount * percentage) / 100;
-
+    for (var doc in expCats.docs) {
+      final pct = (doc['percentage'] as num?)?.toDouble() ?? 0;
+      final alloc = (amount * pct) / 100;
       await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .collection('allocations')
           .add({
-        'transactionId': transactionId,
-        'categoryId': category['name'],
-        'amount': allocatedAmount,
+        'transactionId': txId,
+        'categoryId': doc['name'],
+        'amount': alloc,
         'timestamp': FieldValue.serverTimestamp(),
       });
     }
   }
 
   Future<double> _calculateExpensePercentageTotal() async {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) return 0;
-    final snapshot = await FirebaseFirestore.instance
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return 0;
+    final snap = await FirebaseFirestore.instance
         .collection('users')
-        .doc(userId)
+        .doc(uid)
         .collection('categories')
         .where('type', isEqualTo: 'Expense')
         .get();
-    double total = 0;
-    for (var doc in snapshot.docs) {
-      total += (doc['percentage'] as num?)?.toDouble() ?? 0;
-    }
-    return total;
+    return snap.docs.fold<double>(
+        0, (sum, d) => sum + ((d['percentage'] as num?)?.toDouble() ?? 0));
   }
 
   void _addManualTransaction(BuildContext context) {
@@ -549,17 +535,16 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       return;
     }
-
     String? type;
-    final amountController = TextEditingController();
-    final descriptionController = TextEditingController();
+    final amtCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
     DateTime selectedDate = DateTime.now();
-    String? selectedCategory;
+    String? selCat;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
+        builder: (context, setState) => AlertDialog(
           title: const Text('Add Cash Transaction'),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -570,52 +555,30 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(
-                    labelText: 'Type',
-                    border: OutlineInputBorder(),
-                  ),
+                      labelText: 'Type', border: OutlineInputBorder()),
                   value: type,
                   items: ['Income', 'Expense']
                       .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                       .toList(),
-                  onChanged: (value) {
-                    setDialogState(() {
-                      type = value;
-                      selectedCategory = null;
+                  onChanged: (v) {
+                    setState(() {
+                      type = v;
+                      selCat = null;
                     });
                   },
-                  validator: (value) =>
-                      value == null ? 'Please select a type' : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
-                  controller: amountController,
-                  decoration: const InputDecoration(
-                    labelText: 'Amount',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.number,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter an amount';
-                    }
-                    if (double.tryParse(value) == null ||
-                        double.parse(value) <= 0) {
-                      return 'Please enter a valid positive amount';
-                    }
-                    return null;
-                  },
-                ),
+                    controller: amtCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Amount', border: OutlineInputBorder()),
+                    keyboardType: TextInputType.number),
                 const SizedBox(height: 16),
                 TextFormField(
-                  controller: descriptionController,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'Please enter a description'
-                      : null,
-                ),
+                    controller: descCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Description',
+                        border: OutlineInputBorder())),
                 const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -623,47 +586,35 @@ class _HomeScreenState extends State<HomeScreen> {
                     Text(
                         'Date: ${DateFormat('dd/MM/yy').format(selectedDate)}'),
                     TextButton(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: selectedDate,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime.now(),
-                        );
-                        if (picked != null) {
-                          setDialogState(() {
-                            selectedDate = picked;
-                          });
-                        }
-                      },
-                      child: const Text('Pick Date'),
-                    ),
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now());
+                          if (picked != null)
+                            setState(() => selectedDate = picked);
+                        },
+                        child: const Text('Pick Date')),
                   ],
                 ),
                 const SizedBox(height: 16),
                 if (type != null)
                   FutureBuilder<List<String>>(
                     future: _fetchCategories(type!),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
+                    builder: (context, snap) {
+                      if (!snap.hasData)
                         return const CircularProgressIndicator();
-                      }
-                      final categories = snapshot.data!;
                       return DropdownButtonFormField<String>(
                         decoration: const InputDecoration(
-                          labelText: 'Category (Optional)',
-                          border: OutlineInputBorder(),
-                        ),
-                        value: selectedCategory,
-                        items: categories
-                            .map((cat) =>
-                                DropdownMenuItem(value: cat, child: Text(cat)))
+                            labelText: 'Category (Optional)',
+                            border: OutlineInputBorder()),
+                        value: selCat,
+                        items: snap.data!
+                            .map((c) =>
+                                DropdownMenuItem(value: c, child: Text(c)))
                             .toList(),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            selectedCategory = value;
-                          });
-                        },
+                        onChanged: (v) => setState(() => selCat = v),
                       );
                     },
                   ),
@@ -672,78 +623,61 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel')),
             ElevatedButton(
-              onPressed: () async {
-                if (type == null ||
-                    amountController.text.isEmpty ||
-                    descriptionController.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Please fill all required fields')),
-                  );
-                  return;
-                }
-                final amount = double.tryParse(amountController.text);
-                if (amount == null || amount <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Please enter a valid amount')),
-                  );
-                  return;
-                }
-
-                if (type == 'Income') {
-                  final expenseTotal = await _calculateExpensePercentageTotal();
-                  if (expenseTotal != 100) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                            'Expense categories must total 100% to allocate income.'),
-                      ),
-                    );
+                onPressed: () async {
+                  if (type == null ||
+                      amtCtrl.text.isEmpty ||
+                      descCtrl.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Please fill all required fields')));
                     return;
                   }
-                }
-
-                try {
-                  final docRef = FirebaseFirestore.instance
-                      .collection('users')
-                      .doc(userId)
-                      .collection('transactions')
-                      .doc();
-                  final transactionData = {
-                    'type': type,
-                    'amount': amount,
-                    'description': descriptionController.text,
-                    'date': selectedDate.toIso8601String(),
-                    'rawSms': 'Manual cash transaction',
-                    'transactionId': 'MANUAL_${docRef.id}',
-                    'categoryId': selectedCategory,
-                    'timestamp': FieldValue.serverTimestamp(),
-                  };
-
-                  await docRef.set(transactionData);
-
+                  final amt = double.tryParse(amtCtrl.text);
+                  if (amt == null || amt <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Please enter a valid amount')));
+                    return;
+                  }
                   if (type == 'Income') {
-                    await _allocateIncome(docRef.id, amount, userId);
+                    final total = await _calculateExpensePercentageTotal();
+                    if (total != 100) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text(
+                              'Expense categories must total 100% to allocate income.')));
+                      return;
+                    }
                   }
 
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Transaction added successfully')),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to add transaction: $e')),
-                  );
-                }
-              },
-              child: const Text('Add'),
-            ),
+                  try {
+                    final docRef = FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(userId)
+                        .collection('transactions')
+                        .doc();
+                    final data = {
+                      'type': type,
+                      'amount': amt,
+                      'description': descCtrl.text,
+                      'date': selectedDate.toIso8601String(),
+                      'rawSms': 'Manual cash transaction',
+                      'transactionId': 'MANUAL_${docRef.id}',
+                      'categoryId': selCat,
+                      'timestamp': FieldValue.serverTimestamp(),
+                    };
+                    await docRef.set(data);
+                    if (type == 'Income')
+                      await _allocateIncome(docRef.id, amt, userId);
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Transaction added successfully')));
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('Failed to add transaction: $e')));
+                  }
+                },
+                child: const Text('Add')),
           ],
         ),
       ),
@@ -769,79 +703,69 @@ class _HomeScreenState extends State<HomeScreen> {
                   break;
                 case 'settings':
                   Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                  );
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const SettingsScreen()));
                   break;
                 case 'logout':
                   _handleLogout(context);
                   break;
               }
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
+            itemBuilder: (_) => [
+              const PopupMenuItem<String>(
                 value: 'fetch',
                 child: Row(
                   children: [
-                    Icon(Icons.refresh, color: Colors.black54),
+                    Icon(Icons.refresh,
+                        color: Colors.blue, size: 20),
                     SizedBox(width: 8),
                     Text('Fetch SMS'),
                   ],
                 ),
               ),
               const PopupMenuItem(
-                value: 'add',
-                child: Row(
-                  children: [
-                    Icon(Icons.add, color: Colors.black54),
+                  value: 'add',
+                  child: Row(children: [
+                    Icon(Icons.add,
+                        color: Colors.green, size: 20),
                     SizedBox(width: 8),
-                    Text('Add Cash'),
-                  ],
-                ),
-              ),
+                    Text('Add Cash')
+                  ])),
               const PopupMenuItem(
-                value: 'settings',
-                child: Row(
-                  children: [
-                    Icon(Icons.settings, color: Colors.black54),
+                  value: 'settings',
+                  child: Row(children: [
+                    Icon(Icons.settings,
+                        color: Colors.grey, size: 20),
                     SizedBox(width: 8),
-                    Text('Settings'),
-                  ],
-                ),
-              ),
+                    Text('Settings')
+                  ])),
               const PopupMenuItem(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout, color: Colors.black54),
+                  value: 'logout',
+                  child: Row(children: [
+                    Icon(Icons.logout,
+                        color: Colors.red, size: 20),
                     SizedBox(width: 8),
-                    Text('Logout'),
-                  ],
-                ),
-              ),
+                    Text('Logout')
+                  ])),
             ],
-          ),
+          )
         ],
       ),
       body: Stack(
-        children: [
-          _screens[_selectedIndex],
-        ],
-      ),
+          children: _screens
+              .asMap()
+              .entries
+              .map((e) => e.key == _selectedIndex ? e.value : Container())
+              .toList()),
       bottomNavigationBar: BottomNavigationBar(
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.list_alt),
-            label: 'Uncategorized',
-          ),
+              icon: Icon(Icons.list_alt), label: 'Uncategorized'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.category),
-            label: 'Categorized',
-          ),
+              icon: Icon(Icons.category), label: 'Categorized'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.bar_chart),
-            label: 'Reports',
-          ),
+              icon: Icon(Icons.bar_chart), label: 'Reports'),
         ],
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
