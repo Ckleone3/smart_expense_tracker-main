@@ -26,8 +26,8 @@ plugins {
     // Firebase / Google services
     id "com.google.gms.google-services" version "4.3.15" apply false
 
-    // Kotlin Android plugin bumped to latest stable
-    id "org.jetbrains.kotlin.android" version "2.2.0-Beta2" apply false
+    // Kotlin Android plugin downgraded to stable 2.0.0 for R8 compatibility
+    id "org.jetbrains.kotlin.android" version "2.0.0" apply false
 }
 
 include ":app"

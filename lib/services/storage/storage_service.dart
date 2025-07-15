@@ -37,7 +37,7 @@ class StorageService extends ChangeNotifier {
   Future<void> _initialize() async {
     try {
       await _storage.initialize();
-      debugPrint('StorageService: storage initialized (${_currentStorageType})');
+      debugPrint('StorageService: storage initialized ($_currentStorageType)');
     } catch (e, st) {
       debugPrint('StorageService initialization error: $e');
       debugPrint('$st');

@@ -17,6 +17,7 @@ import 'package:smart_expense_tracker/widgets/custom_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:smart_expense_tracker/screens/dashboard_screen.dart';
 
 import 'firebase_options.dart';
 import 'services/storage/storage_service.dart';
@@ -88,10 +89,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
-  bool _isFetching = false;
   late SmsService _smsService;
 
   static final List<Widget> _screens = [
+    const DashboardScreen(),
     const UncategorizedScreen(),
     const CategorizedScreen(),
     const ReportsScreen(),
@@ -184,7 +185,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeServiceAndSync() async {
-    setState(() => _isFetching = true);
     try {
       await _smsService.init();
       final newMessages = await _smsService.initializeSmsStore();
@@ -197,8 +197,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error during initial SMS sync: $e')),
       );
-    } finally {
-      setState(() => _isFetching = false);
     }
   }
 
@@ -357,11 +355,9 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.download),
               label: const Text('Fetch'),
               onPressed: () {
-                if (selectedYear != null && selectedMonth != null) {
-                  final date = DateTime(selectedYear, selectedMonth, 1);
-                  Navigator.pop(context);
-                  _fetchSms('month', date);
-                }
+                final date = DateTime(selectedYear, selectedMonth, 1);
+                Navigator.pop(context);
+                _fetchSms('month', date);
               },
             ),
           ],
@@ -401,7 +397,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _fetchSms(String fetchType, DateTime referenceDate,
       {DateTime? rangeEnd}) async {
     Navigator.pop(context);
-    setState(() => _isFetching = true);
     try {
       final result = await _smsService
           .fetchTransactions(fetchType, referenceDate, rangeEnd: rangeEnd);
@@ -420,8 +415,6 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(content: Text('Error fetching transactions: $e')),
         );
       }
-    } finally {
-      setState(() => _isFetching = false);
     }
   }
 
@@ -592,8 +585,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               initialDate: selectedDate,
                               firstDate: DateTime(2020),
                               lastDate: DateTime.now());
-                          if (picked != null)
+                          if (picked != null) {
                             setState(() => selectedDate = picked);
+                          }
                         },
                         child: const Text('Pick Date')),
                   ],
@@ -603,8 +597,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   FutureBuilder<List<String>>(
                     future: _fetchCategories(type!),
                     builder: (context, snap) {
-                      if (!snap.hasData)
+                      if (!snap.hasData) {
                         return const CircularProgressIndicator();
+                      }
                       return DropdownButtonFormField<String>(
                         decoration: const InputDecoration(
                             labelText: 'Category (Optional)',
@@ -667,8 +662,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       'timestamp': FieldValue.serverTimestamp(),
                     };
                     await docRef.set(data);
-                    if (type == 'Income')
+                    if (type == 'Income') {
                       await _allocateIncome(docRef.id, amt, userId);
+                    }
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                         content: Text('Transaction added successfully')));
@@ -760,6 +756,8 @@ class _HomeScreenState extends State<HomeScreen> {
               .toList()),
       bottomNavigationBar: BottomNavigationBar(
         items: const [
+          BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard), label: 'Dashboard'),
           BottomNavigationBarItem(
               icon: Icon(Icons.list_alt), label: 'Uncategorized'),
           BottomNavigationBarItem(

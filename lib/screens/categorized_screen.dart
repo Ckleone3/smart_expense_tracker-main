@@ -356,12 +356,30 @@ class _CategorizedScreenState extends State<CategorizedScreen>
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
+          labelColor: Colors.white, // Selected tab text color
+          unselectedLabelColor: Colors.white70, // Unselected tab text color
+          indicatorColor: Colors.white, // Optional: indicator color
           tabs: const [
-            Tab(icon: Icon(Icons.arrow_downward), text: 'Income'),
-            Tab(icon: Icon(Icons.arrow_upward), text: 'Expenses'),
-            Tab(icon: Icon(Icons.account_balance), text: 'Allocations'),
-            Tab(icon: Icon(Icons.list_alt), text: 'Master Expenses'),
-            Tab(icon: Icon(Icons.list_alt), text: 'Master Income'),
+            Tab(
+                icon: Tooltip(
+                    message: 'Income', child: Icon(Icons.arrow_downward)),
+                text: 'Income'),
+            Tab(
+                icon: Tooltip(
+                    message: 'Expenses', child: Icon(Icons.arrow_upward)),
+                text: 'Expenses'),
+            Tab(
+                icon: Tooltip(
+                    message: 'Allocations', child: Icon(Icons.account_balance)),
+                text: 'Allocations'),
+            Tab(
+                icon: Tooltip(
+                    message: 'Master Expenses', child: Icon(Icons.list_alt)),
+                text: 'Master Expenses'),
+            Tab(
+                icon: Tooltip(
+                    message: 'Master Income', child: Icon(Icons.list_alt)),
+                text: 'Master Income'),
           ],
         ),
       ),
@@ -398,8 +416,6 @@ class _CategorizedScreenState extends State<CategorizedScreen>
             'Expense': <String, List<QueryDocumentSnapshot>>{},
           };
 
-          double totalIncome = 0.0;
-          double totalExpense = 0.0;
           final expenseTotals = <String, double>{};
           final allocatedAmounts = <String, double>{};
 
@@ -426,11 +442,9 @@ class _CategorizedScreenState extends State<CategorizedScreen>
 
             if (category != null) {
               if (type == 'Income') {
-                totalIncome += amount;
                 groupedTransactions['Income']![category] ??= [];
                 groupedTransactions['Income']![category]!.add(transaction);
               } else if (type == 'Expense') {
-                totalExpense += amount;
                 groupedTransactions['Expense']![category] ??= [];
                 groupedTransactions['Expense']![category]!.add(transaction);
                 expenseTotals[category] =
@@ -454,87 +468,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
             builder: (context, constraints) {
               return Column(
                 children: [
-                  // Summary card with responsive width
-                  Container(
-                    width: constraints.maxWidth,
-                    constraints: const BoxConstraints(maxWidth: 600),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Card(
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('Income',
-                                          style: TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 12)),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '$currency ${totalIncome.toStringAsFixed(2)}',
-                                        style: const TextStyle(
-                                          color: Colors.green,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      const Text('Expenses',
-                                          style: TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 12)),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        '$currency ${totalExpense.toStringAsFixed(2)}',
-                                        style: const TextStyle(
-                                          color: Colors.red,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const Divider(height: 24),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text('Balance',
-                                    style: TextStyle(
-                                        color: Colors.grey, fontSize: 12)),
-                                Text(
-                                  '$currency ${(totalIncome - totalExpense).toStringAsFixed(2)}',
-                                  style: TextStyle(
-                                    color: totalIncome - totalExpense >= 0
-                                        ? Colors.blue
-                                        : Colors.orange,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
+                  const SizedBox(height: 8),
                   // Search TextField with responsive width
                   Container(
                     width: constraints.maxWidth,
@@ -573,11 +507,12 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                         _buildTransactionTab('Income',
                             groupedTransactions['Income']!, currency, userId),
                         _buildEnhancedExpenseTab(
-                            groupedTransactions['Expense']!,
-                            currency,
-                            userId,
-                            balances,
-                            allocatedAmounts),
+                            groupedTransactions:
+                                groupedTransactions['Expense']!,
+                            currency: currency,
+                            userId: userId,
+                            balances: balances,
+                            allocatedAmounts: allocatedAmounts),
                         _buildAllocationsTab(
                             groupedAllocations, currency, userId),
                         _buildMasterExpenseTab(transactions, currency, userId),
@@ -624,48 +559,64 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                     final categoryTotal = transactions.fold<double>(
                         0.0, (sum, t) => sum + (t['amount'] as double? ?? 0.0));
 
-                    return ExpansionTile(
-                      title: Text(category,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                              'Total: $currency ${categoryTotal.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                  color: type == 'Income'
-                                      ? Colors.green
-                                      : Colors.red)),
-                          if (balances != null &&
-                              balances.containsKey(category))
+                    return Semantics(
+                      label:
+                          'Category $category, ${transactions.length} transactions',
+                      child: ExpansionTile(
+                        title: Text(category,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                                'Balance: $currency ${balances[category]!.toStringAsFixed(2)}',
+                                'Total: $currency ${categoryTotal.toStringAsFixed(2)}',
                                 style: TextStyle(
-                                    color: balances[category]! >= 0
-                                        ? Colors.blue
-                                        : Colors.orange)),
-                        ],
-                      ),
-                      leading: CircleAvatar(
-                        backgroundColor:
-                            type == 'Income' ? Colors.green : Colors.red,
-                        child: Icon(
-                            type == 'Income'
-                                ? Icons.arrow_downward
-                                : Icons.arrow_upward,
-                            color: Colors.white,
-                            size: 16),
-                      ),
-                      children: transactions.map((transaction) {
-                        currentCount++;
-                        if (currentCount <= startIndex ||
-                            currentCount > startIndex + _itemsPerPage) {
-                          return const SizedBox.shrink();
-                        }
+                                    color: type == 'Income'
+                                        ? Colors.green
+                                        : Colors.red)),
+                            if (balances != null &&
+                                balances.containsKey(category))
+                              Text(
+                                  'Balance: $currency ${balances[category]!.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                      color: balances[category]! >= 0
+                                          ? Colors.blue
+                                          : Colors.orange)),
+                          ],
+                        ),
+                        leading: Semantics(
+                          label: type == 'Income'
+                              ? 'Income category'
+                              : 'Expense category',
+                          child: Tooltip(
+                            message: type == 'Income'
+                                ? 'Income category'
+                                : 'Expense category',
+                            child: CircleAvatar(
+                              backgroundColor:
+                                  type == 'Income' ? Colors.green : Colors.red,
+                              child: Icon(
+                                type == 'Income'
+                                    ? Icons.arrow_downward
+                                    : Icons.arrow_upward,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          ),
+                        ),
+                        children: transactions.map((transaction) {
+                          currentCount++;
+                          if (currentCount <= startIndex ||
+                              currentCount > startIndex + _itemsPerPage) {
+                            return const SizedBox.shrink();
+                          }
 
-                        return _buildTransactionTile(
-                            transaction, currency, userId);
-                      }).toList(),
+                          return _buildTransactionTile(
+                              transaction, currency, userId);
+                        }).toList(),
+                      ),
                     );
                   },
                 ),
@@ -676,11 +627,11 @@ class _CategorizedScreenState extends State<CategorizedScreen>
   }
 
   Widget _buildEnhancedExpenseTab(
-      Map<String, List<QueryDocumentSnapshot>> groupedTransactions,
-      String currency,
-      String userId,
-      Map<String, double> balances,
-      Map<String, double> allocatedAmounts) {
+      {required Map<String, List<QueryDocumentSnapshot>> groupedTransactions,
+      required String currency,
+      required String userId,
+      required Map<String, double> balances,
+      required Map<String, double> allocatedAmounts}) {
     final filteredGroups = groupedTransactions.entries
         .where((entry) =>
             entry.key.toLowerCase().contains(_searchQuery.toLowerCase()))
@@ -738,25 +689,90 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(category,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 4),
-                                Text(
-                                    'Spent: $currency ${categoryTotal.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        color: Colors.red, fontSize: 12),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
-                                Text(
-                                    'Allocated: $currency ${allocated.toStringAsFixed(2)}',
-                                    style: const TextStyle(
-                                        color: Colors.blue, fontSize: 12),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        category,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: balance >= 0
+                                            ? Colors.green.withOpacity(0.1)
+                                            : Colors.red.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        '$currency ${balance.toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          color: balance >= 0
+                                              ? Colors.green
+                                              : Colors.red,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Spent',
+                                          style: TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                        Text(
+                                          '$currency ${categoryTotal.toStringAsFixed(0)}',
+                                          style: const TextStyle(
+                                            color: Colors.red,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        const Text(
+                                          'Received',
+                                          style: TextStyle(
+                                            color: Colors.grey,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                        Text(
+                                          '$currency ${allocated.toStringAsFixed(0)}',
+                                          style: const TextStyle(
+                                            color: Colors.blue,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
                                 Text(
                                     'Balance: $currency ${balance.toStringAsFixed(2)}',
                                     style: TextStyle(
@@ -859,50 +875,14 @@ class _CategorizedScreenState extends State<CategorizedScreen>
       log('Failed to parse date "$date": $e');
     }
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: type == 'Income' ? Colors.green[100] : Colors.red[100],
-        child: Icon(
-          type == 'Income' ? Icons.arrow_downward : Icons.arrow_upward,
-          color: type == 'Income' ? Colors.green : Colors.red,
-          size: 16,
-        ),
-      ),
-      title: Text(
-        description,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 14),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Category: $categoryId',
-            style: const TextStyle(fontSize: 12),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(
-            'Date: $formattedDate',
-            style: const TextStyle(fontSize: 12),
-          ),
-        ],
-      ),
-      isThreeLine: true,
-      dense: true,
-      trailing: SizedBox(
-        width: 90,
-        child: Text(
-          '$currency ${amount.toStringAsFixed(2)}',
-          style: TextStyle(
-            color: type == 'Income' ? Colors.green : Colors.red,
-            fontWeight: FontWeight.bold,
-            fontSize: 13,
-          ),
-          textAlign: TextAlign.end,
-        ),
-      ),
+    return TransactionTile(
+      type: type,
+      description: description,
+      categoryId: categoryId,
+      date: formattedDate,
+      amount: amount,
+      currency: currency,
+      rawSms: rawSms,
       onTap: () => _showTransactionDetails(
           context,
           {
@@ -973,10 +953,14 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                       title: Text(category),
                       subtitle: Text(
                           '$currency ${amount.toStringAsFixed(2)} • $formattedDate'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () =>
-                            _deleteAllocation(allocationId, userId),
+                      trailing: Tooltip(
+                        message: 'Delete allocation',
+                        child: IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () =>
+                              _deleteAllocation(allocationId, userId),
+                          tooltip: 'Delete allocation',
+                        ),
                       ),
                     );
                   }).toList(),
@@ -1013,7 +997,16 @@ class _CategorizedScreenState extends State<CategorizedScreen>
         }
       }
       return matchesSearch;
-    }).toList();
+    }).toList()
+      ..sort((a, b) {
+        try {
+          final dateA = DateTime.parse(a['date'] as String? ?? '');
+          final dateB = DateTime.parse(b['date'] as String? ?? '');
+          return dateB.compareTo(dateA); // Most recent first
+        } catch (e) {
+          return 0; // Keep original order if date parsing fails
+        }
+      });
 
     final totalPages = (filteredTransactions.length / _itemsPerPage).ceil();
     final currentTabPage = _tabPageNumbers['Master Expenses'] ?? 0;
@@ -1096,67 +1089,88 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                       child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.red[100],
-                          child: const Icon(Icons.arrow_upward,
-                              color: Colors.red, size: 18),
-                        ),
-                        title: Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Text(
-                            description,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        subtitle: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        title: Text(description),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Date: $formattedDate',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  Text(
-                                    'Category: $categoryId',
-                                    style: const TextStyle(fontSize: 12),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
+                            Text('Category: $categoryId'),
+                            Text('Date: $formattedDate'),
                             Text(
-                              '$currency ${amount.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
+                                'Amount: $currency ${amount.toStringAsFixed(2)}'),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon:
+                                  const Icon(Icons.undo, color: Colors.orange),
+                              tooltip: 'Reverse Categorization',
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: const Text('Reverse Categorization'),
+                                    content: const Text(
+                                        'Are you sure you want to reverse this transaction?'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
+                                        child: const Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
+                                        child: const Text('Reverse',
+                                            style:
+                                                TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm != true) return;
+                                try {
+                                  // Set categoryId to 'Uncategorized'
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(userId)
+                                      .collection('transactions')
+                                      .doc(transaction.id)
+                                      .update({'categoryId': 'Uncategorized'});
+                                  // Remove allocations for this transaction
+                                  final allocs = await FirebaseFirestore
+                                      .instance
+                                      .collection('users')
+                                      .doc(userId)
+                                      .collection('allocations')
+                                      .where('transactionId',
+                                          isEqualTo: transaction.id)
+                                      .get();
+                                  for (var doc in allocs.docs) {
+                                    await doc.reference.delete();
+                                  }
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                          content:
+                                              Text('Transaction reversed.')),
+                                    );
+                                    setState(() {});
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                          content:
+                                              Text('Failed to reverse: $e')),
+                                    );
+                                  }
+                                }
+                              },
                             ),
                           ],
                         ),
-                        isThreeLine: true,
-                        dense: true,
-                        onTap: () => _showTransactionDetails(
-                            context,
-                            {
-                              'amount': amount,
-                              'date': date,
-                              'description': description,
-                              'rawSms': transaction['rawSms'] as String? ??
-                                  'No SMS data',
-                              'currency': currency,
-                              'transactionId': transaction.id,
-                              'type':
-                                  transaction['type'] as String? ?? 'Expense',
-                            },
-                            userId),
                       ),
                     );
                   },
@@ -1190,7 +1204,16 @@ class _CategorizedScreenState extends State<CategorizedScreen>
         }
       }
       return matchesSearch;
-    }).toList();
+    }).toList()
+      ..sort((a, b) {
+        try {
+          final dateA = DateTime.parse(a['date'] as String? ?? '');
+          final dateB = DateTime.parse(b['date'] as String? ?? '');
+          return dateB.compareTo(dateA); // Most recent first
+        } catch (e) {
+          return 0; // Keep original order if date parsing fails
+        }
+      });
 
     final totalPages = (filteredTransactions.length / _itemsPerPage).ceil();
     final currentTabPage = _tabPageNumbers['Master Income'] ?? 0;
@@ -1272,51 +1295,41 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                       elevation: 2,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.green[100],
-                          child: const Icon(Icons.arrow_downward,
-                              color: Colors.green, size: 16),
-                        ),
-                        title: Text(description,
-                            maxLines: 2, overflow: TextOverflow.ellipsis),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Category: $categoryId',
-                                style: const TextStyle(fontSize: 12)),
-                            Text('Date: $formattedDate',
-                                style: const TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                        isThreeLine: true,
-                        dense: true,
-                        trailing: SizedBox(
-                          width: 90,
-                          child: Text(
-                            '$currency ${amount.toStringAsFixed(2)}',
-                            style: const TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
+                      child: TransactionTile(
+                        type: 'Income',
+                        description: description,
+                        categoryId: categoryId,
+                        date: formattedDate,
+                        amount: amount,
+                        currency: currency,
+                        rawSms:
+                            transaction['rawSms'] as String? ?? 'No SMS data',
+                        leading: Semantics(
+                          label: 'Income transaction',
+                          child: Tooltip(
+                            message: 'Income transaction',
+                            child: CircleAvatar(
+                              backgroundColor: Colors.green[100],
+                              child: const Icon(Icons.arrow_downward,
+                                  color: Colors.green, size: 16),
                             ),
-                            textAlign: TextAlign.end,
                           ),
                         ),
+                        amountColor: Colors.green,
                         onTap: () => _showTransactionDetails(
-                            context,
-                            {
-                              'amount': amount,
-                              'date': date,
-                              'description': description,
-                              'rawSms': transaction['rawSms'] as String? ??
-                                  'No SMS data',
-                              'currency': currency,
-                              'transactionId': transaction.id,
-                              'type':
-                                  transaction['type'] as String? ?? 'Income',
-                            },
-                            userId),
+                          context,
+                          {
+                            'amount': amount,
+                            'date': date,
+                            'description': description,
+                            'rawSms': transaction['rawSms'] as String? ??
+                                'No SMS data',
+                            'currency': currency,
+                            'transactionId': transaction.id,
+                            'type': transaction['type'] as String? ?? 'Income',
+                          },
+                          userId,
+                        ),
                       ),
                     );
                   },
@@ -1340,6 +1353,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                 ? () =>
                     setState(() => _tabPageNumbers[tabKey] = currentTabPage - 1)
                 : null,
+            tooltip: 'Previous page',
           ),
           Text('Page ${currentTabPage + 1} of $totalPages'),
           IconButton(
@@ -1348,8 +1362,125 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                 ? () =>
                     setState(() => _tabPageNumbers[tabKey] = currentTabPage + 1)
                 : null,
+            tooltip: 'Next page',
           ),
         ],
+      ),
+    );
+  }
+}
+
+class TransactionTile extends StatelessWidget {
+  final String type;
+  final String description;
+  final String categoryId;
+  final String date;
+  final double amount;
+  final String currency;
+  final String rawSms;
+  final Widget? leading;
+  final Color? amountColor;
+  final VoidCallback? onTap;
+
+  const TransactionTile({
+    super.key,
+    required this.type,
+    required this.description,
+    required this.categoryId,
+    required this.date,
+    required this.amount,
+    required this.currency,
+    required this.rawSms,
+    this.leading,
+    this.amountColor,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Minimum tap target size for accessibility
+    return Semantics(
+      label:
+          '$type transaction: $description, category $categoryId, amount $currency ${amount.toStringAsFixed(2)}, date $date',
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            constraints:
+                const BoxConstraints(minHeight: 56, minWidth: double.infinity),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                leading ??
+                    CircleAvatar(
+                      backgroundColor: type == 'Income'
+                          ? Colors.green[100]
+                          : Colors.red[100],
+                      child: Icon(
+                        type == 'Income'
+                            ? Icons.arrow_downward
+                            : Icons.arrow_upward,
+                        color: type == 'Income' ? Colors.green : Colors.red,
+                        size: 18,
+                      ),
+                    ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        description,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        semanticsLabel: 'Description: $description',
+                      ),
+                      Text(
+                        'Category: $categoryId',
+                        style:
+                            const TextStyle(fontSize: 13, color: Colors.grey),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        semanticsLabel: 'Category: $categoryId',
+                      ),
+                      Text(
+                        date,
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                        semanticsLabel: 'Date: $date',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ExcludeSemantics(
+                  child: Text(
+                    '$currency ${amount.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: amountColor ??
+                          (type == 'Income' ? Colors.green : Colors.red),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                // Add a visually hidden button for screen readers to access details
+                Semantics(
+                  label: 'Show details for this transaction',
+                  button: true,
+                  child: const SizedBox(width: 0, height: 0),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

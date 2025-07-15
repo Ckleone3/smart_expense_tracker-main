@@ -140,9 +140,7 @@ class _LoginScreenState extends State<LoginScreen> {
       GoogleSignInAccount? googleUser = await _googleSignIn.signInSilently();
 
       // If silent sign in fails, try interactive sign in
-      if (googleUser == null) {
-        googleUser = await _googleSignIn.signIn();
-      }
+      googleUser ??= await _googleSignIn.signIn();
 
       // Handle user cancellation
       if (googleUser == null) {
@@ -373,9 +371,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       GoogleSignInAccount? googleUser = await _googleSignIn.signInSilently();
 
       // If silent sign in fails, try interactive sign in
-      if (googleUser == null) {
-        googleUser = await _googleSignIn.signIn();
-      }
+      googleUser ??= await _googleSignIn.signIn();
 
       // Handle user cancellation
       if (googleUser == null) {
