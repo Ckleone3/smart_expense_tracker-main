@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import 'dart:developer';
 import 'package:provider/provider.dart';
 import 'package:smart_expense_tracker/services/subscription_service.dart';
 import 'package:smart_expense_tracker/services/sms_service.dart' as sms;
@@ -26,6 +27,8 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
   bool _hasMore = true;
   bool _isInitialLoading = true;
   StreamSubscription<QuerySnapshot>? _streamSubscription;
+  bool _isCategorizing = false;
+  String? _categorizingTransactionId;
 
   DateTime _selectedDate = DateTime.now();
   bool _isSelectionMode = false;
@@ -43,8 +46,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     _subscriptionService =
         Provider.of<SubscriptionService>(context, listen: false);
     // Listen for tier changes
-    _subscriptionStream =
-        _subscriptionService.tierStream().listen((tier) {
+    _subscriptionStream = _subscriptionService.tierStream().listen((tier) {
       final was = _isPremium;
       setState(() => _isPremium = tier == SubscriptionTier.premium);
       if (was != _isPremium) _resetAndReload();
@@ -92,7 +94,8 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     _streamSubscription?.cancel();
-    final start = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    final start =
+        DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
     final end = start
         .add(const Duration(days: 1))
         .subtract(const Duration(milliseconds: 1));
@@ -109,6 +112,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
         .listen((snap) {
       if (!mounted) return;
       setState(() {
+        // For premium users, replace the entire list since it's paginated
         _transactions = snap.docs;
         _lastDoc = snap.docs.isNotEmpty ? snap.docs.last : null;
         _hasMore = snap.docs.length == _pageSize;
@@ -129,7 +133,8 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
   Future<void> _fetchMoreTransactions(String uid) async {
     if (!_isPremium || _isLoadingMore || !_hasMore || _lastDoc == null) return;
     setState(() => _isLoadingMore = true);
-    final start = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    final start =
+        DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
     final end = start
         .add(const Duration(days: 1))
         .subtract(const Duration(milliseconds: 1));
@@ -165,15 +170,16 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     if (!mounted) return;
     setState(() => _isInitialLoading = true);
     try {
-      final start = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+      final start =
+          DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
       final end = start
           .add(const Duration(days: 1))
           .subtract(const Duration(milliseconds: 1));
 
-      // 1) Grab all Hive‐stored SMS in that day
+      // 1) Grab all Hive‐stored SMS in that day that are uncategorized (categoryId is null)
       final rawList = _smsService.transactionBox.values.where((h) {
         final d = DateTime.parse(h.date);
-        return !d.isBefore(start) && !d.isAfter(end);
+        return !d.isBefore(start) && !d.isAfter(end) && h.categoryId == null;
       }).toList();
 
       // 2) Re‐parse each through your enhanced parser
@@ -188,16 +194,16 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
           .toList();
 
       // 3) Sort newest first
-      parsed.sort((a, b) => DateTime.parse(b.date)
-          .compareTo(DateTime.parse(a.date)));
+      parsed.sort(
+          (a, b) => DateTime.parse(b.date).compareTo(DateTime.parse(a.date)));
 
       // 4) Update UI
       setState(() {
         _transactions = parsed;
         _hasMore = false;
         _isInitialLoading = false;
-        _selectedTransactionIds.retainWhere((id) =>
-            parsed.any((t) => t.transactionId == id));
+        _selectedTransactionIds
+            .retainWhere((id) => parsed.any((t) => t.transactionId == id));
       });
     } catch (e) {
       if (mounted) {
@@ -239,48 +245,45 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     }
   }
 
- Future<void> _fetchSmsForSelectedDate() async {
-  try {
-    // In case the box was closed, re-initialize the service (re-opens Hive)
-    await _smsService.init();
-  } catch (_) {
-    // ignore any “already initialized” errors
-  }
-
-  try {
-    final result = await _smsService.fetchTransactions('day', _selectedDate);
-    final parsed = result['parsed']!;
-
-    _showSnackBar(
-      context,
-      parsed > 0
-          ? 'Fetched $parsed SMS transactions for ${DateFormat('dd/MM/yyyy').format(_selectedDate)}'
-          : 'No new SMS transactions for ${DateFormat('dd/MM/yyyy').format(_selectedDate)}'
-    );
-
-    if (!_isPremium) {
-      await _loadLocalTransactions();
+  Future<void> _fetchSmsForSelectedDate() async {
+    try {
+      // In case the box was closed, re-initialize the service (re-opens Hive)
+      await _smsService.init();
+    } catch (_) {
+      // ignore any “already initialized” errors
     }
-  } on HiveError {
-    // box still closed? force re-open and retry once
-    await _smsService.init();
-    return _fetchSmsForSelectedDate();
-  } catch (e) {
-    if (e.toString().contains('NO_KEYWORDS_SET')) {
-      _showNoKeywordsDialog(context);
-    } else {
-      _showSnackBar(context, 'Error fetching SMS: $e');
+
+    try {
+      final result = await _smsService.fetchTransactions('day', _selectedDate);
+      final parsed = result['parsed']!;
+
+      _showSnackBar(
+          context,
+          parsed > 0
+              ? 'Fetched $parsed SMS transactions for ${DateFormat('dd/MM/yyyy').format(_selectedDate)}'
+              : 'No new SMS transactions for ${DateFormat('dd/MM/yyyy').format(_selectedDate)}');
+
+      if (!_isPremium) {
+        await _loadLocalTransactions();
+      }
+    } on HiveError {
+      // box still closed? force re-open and retry once
+      await _smsService.init();
+      return _fetchSmsForSelectedDate();
+    } catch (e) {
+      if (e.toString().contains('NO_KEYWORDS_SET')) {
+        _showNoKeywordsDialog(context);
+      } else {
+        _showSnackBar(context, 'Error fetching SMS: $e');
+      }
     }
   }
-}
-
 
   void _selectAll() {
     setState(() {
       if (_isPremium) {
-        _selectedTransactionIds = _transactions
-            .map((t) => (t as QueryDocumentSnapshot).id)
-            .toList();
+        _selectedTransactionIds =
+            _transactions.map((t) => (t as QueryDocumentSnapshot).id).toList();
       } else {
         _selectedTransactionIds = _transactions
             .cast<sms.Transaction>()
@@ -301,8 +304,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
           'Delete ${_selectedTransactionIds.length} selected transaction'
           '${_selectedTransactionIds.length > 1 ? 's' : ''}?',
         ),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -344,8 +346,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('No Keywords Set'),
         icon: const Icon(Icons.info_outline, color: Colors.orange, size: 36),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: const [
@@ -408,6 +409,17 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             icon: const Icon(Icons.calendar_today),
             onPressed: () => _pickDate(context),
           ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              if (_isPremium) {
+                _startListeningToStream(); // Force stream restart for premium users
+              } else {
+                await _loadLocalTransactions(); // Refresh local data for free users
+              }
+            },
+            tooltip: 'Refresh transactions',
+          ),
           if (_isSelectionMode) ...[
             IconButton(
               icon: const Icon(Icons.select_all),
@@ -419,20 +431,24 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             ),
           ],
           IconButton(
-            icon: Icon(
-                _isSelectionMode ? Icons.close : Icons.select_all),
+            icon: Icon(_isSelectionMode ? Icons.close : Icons.select_all),
             onPressed: () =>
                 setState(() => _isSelectionMode = !_isSelectionMode),
           ),
         ],
       ),
-
-          body: _isInitialLoading
+      body: _isInitialLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: () async {
                 // 1) always pull-to-refresh the SMS fetch
                 await _fetchSmsForSelectedDate();
+                // 2) then refresh the transaction list to remove categorized items
+                if (_isPremium) {
+                  _startListeningToStream(); // Force stream restart for premium users
+                } else {
+                  await _loadLocalTransactions(); // Refresh local data for free users
+                }
               },
               child: ListView(
                 controller: _scrollController,
@@ -454,15 +470,14 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                             const SizedBox(height: 16),
                             const Text(
                               'No uncategorized transactions',
-                              style: TextStyle(
-                                  fontSize: 18, color: Colors.grey),
+                              style:
+                                  TextStyle(fontSize: 18, color: Colors.grey),
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Pull down to fetch SMS for ${DateFormat('dd/MM/yyyy').format(_selectedDate)}',
                               style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey.shade600),
+                                  fontSize: 14, color: Colors.grey.shade600),
                             ),
                           ],
                         ),
@@ -482,8 +497,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                           doc['description'] as String? ?? 'No description',
                           doc['date'] as String? ?? '',
                           doc['rawSms'] as String? ?? '',
-                          isSelected:
-                              _selectedTransactionIds.contains(doc.id),
+                          isSelected: _selectedTransactionIds.contains(doc.id),
                         );
                       } else {
                         final localTx = _transactions[i] as sms.Transaction;
@@ -508,8 +522,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                       child: _isLoadingMore
                           ? const Center(child: CircularProgressIndicator())
                           : ElevatedButton(
-                              onPressed: () =>
-                                  _fetchMoreTransactions(uid),
+                              onPressed: () => _fetchMoreTransactions(uid),
                               style: ElevatedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 20, vertical: 12),
@@ -523,7 +536,6 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                 ],
               ),
             ),
-
     );
   }
 
@@ -543,36 +555,42 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
   }) {
     String time;
     try {
-      time = DateFormat('HH:mm')
-          .format(DateTime.parse(date));
+      time = DateFormat('HH:mm').format(DateTime.parse(date));
     } catch (_) {
       time = 'Invalid';
     }
 
+    final bool isCurrentlyCategorizing = _isCategorizing && _categorizingTransactionId == id;
+
     return Card(
       elevation: 2,
-      margin:
-          const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16)),
-      color: isSelected
-          ? Colors.blue.withOpacity(0.2)
-          : null,
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: isSelected ? Colors.blue.withOpacity(0.2) : null,
       child: ListTile(
-        leading: type == 'Income'
-            ? CircleAvatar(
-                backgroundColor: Colors.green[100],
-                child: const Icon(Icons.arrow_downward, color: Colors.green, size: 20),
+        leading: isCurrentlyCategorizing
+            ? const SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : type == 'Expense'
+            : type == 'Income'
                 ? CircleAvatar(
-                    backgroundColor: Colors.red[100],
-                    child: const Icon(Icons.arrow_upward, color: Colors.red, size: 20),
+                    backgroundColor: Colors.green[100],
+                    child: const Icon(Icons.arrow_downward,
+                        color: Colors.green, size: 20),
                   )
-                : CircleAvatar(
-                    backgroundColor: Colors.grey[200],
-                    child: const Icon(Icons.help_outline, color: Colors.grey, size: 20),
-                  ),
+                : type == 'Expense'
+                    ? CircleAvatar(
+                        backgroundColor: Colors.red[100],
+                        child: const Icon(Icons.arrow_upward,
+                            color: Colors.red, size: 20),
+                      )
+                    : CircleAvatar(
+                        backgroundColor: Colors.grey[200],
+                        child: const Icon(Icons.help_outline,
+                            color: Colors.grey, size: 20),
+                      ),
         onTap: _isSelectionMode
             ? () => setState(() {
                   if (isSelected) {
@@ -581,17 +599,21 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                     _selectedTransactionIds.add(id);
                   }
                 })
-            : () => _showDetails(ctxt, {
-                  'transactionId': id,
-                  'type': type,
-                  'amount': amount,
-                  'date': date,
-                  'rawSms': rawSms,
+            : isCurrentlyCategorizing
+                ? null // Disable tap while categorizing
+                : () => _showDetails(ctxt, {
+                      'transactionId': id,
+                      'type': type,
+                      'amount': amount,
+                      'date': date,
+                      'rawSms': rawSms,
+                    }),
+        onLongPress: isCurrentlyCategorizing
+            ? null // Disable long press while categorizing
+            : () => setState(() {
+                  _isSelectionMode = true;
+                  _selectedTransactionIds.add(id);
                 }),
-        onLongPress: () => setState(() {
-          _isSelectionMode = true;
-          _selectedTransactionIds.add(id);
-        }),
         title: Row(
           children: [
             Expanded(
@@ -599,70 +621,90 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                 text: TextSpan(
                   children: [
                     TextSpan(
-                      text: type == 'Income' ? 'Income' : type == 'Expense' ? 'Expense' : type,
+                      text: isCurrentlyCategorizing
+                          ? 'Categorizing...'
+                          : type == 'Income'
+                              ? 'Income'
+                              : type == 'Expense'
+                                  ? 'Expense'
+                                  : type,
                       style: TextStyle(
-                        color: type == 'Income'
-                            ? Colors.green
-                            : type == 'Expense'
-                                ? Colors.red
-                                : Colors.black,
+                        color: isCurrentlyCategorizing
+                            ? Colors.grey
+                            : type == 'Income'
+                                ? Colors.green
+                                : type == 'Expense'
+                                    ? Colors.red
+                                    : Colors.black,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
                     ),
-                    TextSpan(
-                      text: ': $description',
-                      style: const TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.normal,
-                        fontSize: 16,
+                    if (!isCurrentlyCategorizing) ...[
+                      TextSpan(
+                        text: ': $description',
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.normal,
+                          fontSize: 16,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (type == 'Unknown' && !_isSelectionMode)
+            if (type == 'Unknown' && !_isSelectionMode && !isCurrentlyCategorizing)
               IconButton(
-                icon: const Icon(Icons.help_outline,
-                    color: Colors.orange),
-                onPressed: () =>
-                    _updateTransactionType(id, ctxt),
+                icon: const Icon(Icons.help_outline, color: Colors.orange),
+                onPressed: () => _updateTransactionType(id, ctxt),
                 tooltip: 'Set Type',
               ),
           ],
         ),
         subtitle: Text(
-          'Amount: ${NumberFormat.currency(symbol: 'Ksh ').format(amount)} — $time\nRaw: $rawSms',
-          style: const TextStyle(fontSize: 12),
+          isCurrentlyCategorizing
+              ? 'Please wait while categorizing transaction...'
+              : 'Amount: ${NumberFormat.currency(symbol: 'Ksh ').format(amount)} — $time\nRaw: $rawSms',
+          style: TextStyle(
+            fontSize: 12,
+            color: isCurrentlyCategorizing ? Colors.grey : null,
+          ),
         ),
         trailing: _isSelectionMode
             ? Checkbox(
                 value: isSelected,
-                onChanged: (_) => setState(() {
-                  if (isSelected) {
-                    _selectedTransactionIds.remove(id);
-                  } else {
-                    _selectedTransactionIds.add(id);
-                  }
-                }),
+                onChanged: isCurrentlyCategorizing
+                    ? null // Disable checkbox while categorizing
+                    : (_) => setState(() {
+                          if (isSelected) {
+                            _selectedTransactionIds.remove(id);
+                          } else {
+                            _selectedTransactionIds.add(id);
+                          }
+                        }),
               )
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.edit,
-                        color: Colors.blue),
-                    onPressed: () =>
-                        _categorizeTransaction(
-                            id, type, amount, ctxt),
+                    icon: isCurrentlyCategorizing
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.edit, color: Colors.blue),
+                    onPressed: isCurrentlyCategorizing
+                        ? null // Disable edit button while categorizing
+                        : () => _categorizeTransaction(id, type, amount, ctxt),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete,
-                        color: Colors.red),
-                    onPressed: () =>
-                        _deleteSingle(ctxt, id),
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    onPressed: isCurrentlyCategorizing
+                        ? null // Disable delete button while categorizing
+                        : () => _deleteSingle(ctxt, id),
                   ),
                 ],
               ),
@@ -670,8 +712,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     );
   }
 
-  void _showDetails(
-      BuildContext c, Map<String, dynamic> d) {
+  void _showDetails(BuildContext c, Map<String, dynamic> d) {
     showDialog(
       context: c,
       builder: (ctx) => AlertDialog(
@@ -747,8 +788,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       context: c,
       builder: (ctx) => AlertDialog(
         title: Text('Select $type Category'),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -756,28 +796,68 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
               return ListTile(
                 title: Text(cat),
                 onTap: () async {
-                  if (type == 'Expense') {
-                    final proj = await _fetchCategoryBalance(
-                        uid, cat, amount);
-                    if (proj < 0) {
-                      Navigator.pop(ctx);
-                      _showSnackBar(context,
-                          'Insufficient funds in $cat');
-                      return;
-                    }
-                  }
+                  // Show loading indicator
+                  setState(() {
+                    _isCategorizing = true;
+                    _categorizingTransactionId = txId;
+                  });
+                  Navigator.pop(ctx); // Close dialog immediately
+                  
                   try {
+                    if (type == 'Expense') {
+                      final proj = await _fetchCategoryBalance(uid, cat, amount);
+                      if (proj < 0) {
+                        _showSnackBar(context, 'Insufficient funds in $cat');
+                        return;
+                      }
+                    }
+                    
+                    // Update both categoryId and type in Firestore
+                    final updateData = {'categoryId': cat};
+                    if (type == 'Unknown') {
+                      updateData['type'] = cat; // Use category name as the type for Unknown transactions
+                    }
+                    
                     await _firestore
                         .collection('users')
                         .doc(uid)
                         .collection('transactions')
                         .doc(txId)
-                        .update({'categoryId': cat});
-                    Navigator.pop(ctx);
+                        .update(updateData);
                     _showSnackBar(context, 'Categorized as $cat');
+                    
+                    // Update local storage immediately for free users
+                    if (!_isPremium) {
+                      try {
+                        // Update local transaction with new categoryId and type
+                        await _smsService.updateTransactionCategory(txId, cat);
+                        
+                        // If it was an Unknown transaction, also update the type locally
+                        if (type == 'Unknown') {
+                          await _updateLocalTransactionType(txId, cat);
+                        }
+                        
+                        // Update the transaction in the current list without full refresh
+                        _updateTransactionInList(txId, cat, type == 'Unknown' ? cat : type);
+                      } catch (e) {
+                        log('Error updating local transaction: $e');
+                        // Fallback to full refresh if local update fails
+                        await _loadLocalTransactions();
+                      }
+                    } else {
+                      // For premium users, remove the transaction from the current list without restarting the stream
+                      _removeTransactionFromList(txId);
+                    }
                   } catch (e) {
-                    _showSnackBar(context,
-                        'Failed to categorize: $e');
+                    _showSnackBar(context, 'Failed to categorize: $e');
+                  } finally {
+                    // Hide loading indicator
+                    if (mounted) {
+                      setState(() {
+                        _isCategorizing = false;
+                        _categorizingTransactionId = null;
+                      });
+                    }
                   }
                 },
               );
@@ -794,27 +874,26 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     );
   }
 
-  void _categorizeTransaction(String txId, String type, double amount,
-      BuildContext ctxt) async {
+  void _categorizeTransaction(
+      String txId, String type, double amount, BuildContext ctxt) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
-      _showSnackBar(ctxt,
-          'Please sign in to categorize transactions');
+      _showSnackBar(ctxt, 'Please sign in to categorize transactions');
       return;
     }
 
     final cats = await _fetchCategories(type);
     if (cats.isEmpty) {
-      _showSnackBar(ctxt,
-          'No $type categories available. Add some in Settings.');
+      _showSnackBar(
+          ctxt, 'No $type categories available. Add some in Settings.');
       return;
     }
 
     if (type == 'Income') {
       final total = await _calculateExpensePercentageTotal();
       if (total != 100) {
-        _showSnackBar(ctxt,
-            'Expense categories must total 100% to categorize income.');
+        _showSnackBar(
+            ctxt, 'Expense categories must total 100% to categorize income.');
         return;
       }
       await _allocateIncome(txId, amount, uid);
@@ -845,8 +924,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     );
   }
 
-  Future<void> _allocateIncome(
-      String txId, double amount, String uid) async {
+  Future<void> _allocateIncome(String txId, double amount, String uid) async {
     final cats = await _firestore
         .collection('users')
         .doc(uid)
@@ -877,8 +955,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       context: ctxt,
       builder: (ctx) => AlertDialog(
         title: const Text('Set Transaction Type'),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -929,8 +1006,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Transaction'),
         content: const Text('Are you sure?'),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -951,8 +1027,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                 _showSnackBar(c, 'Failed to delete: $e');
               }
             },
-            child: const Text('Delete',
-                style: TextStyle(color: Colors.red)),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           )
         ],
       ),
@@ -967,9 +1042,96 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           minimumSize: const Size(double.infinity, 48),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
         child: Text(label),
       );
+
+  // Update transaction type in local storage
+  Future<void> _updateLocalTransactionType(String transactionId, String newType) async {
+    try {
+      final transaction = _smsService.transactionBox.values.firstWhere(
+        (t) => t.transactionId == transactionId,
+        orElse: () => throw Exception('Transaction not found in local storage'),
+      );
+
+      // Create updated transaction with new type
+      final updatedTransaction = sms.Transaction(
+        type: newType,
+        amount: transaction.amount,
+        description: transaction.description,
+        date: transaction.date,
+        transactionId: transaction.transactionId,
+        rawSms: transaction.rawSms,
+        categoryId: transaction.categoryId,
+      );
+      
+      // Get the Hive key for this transaction
+      final hiveKey = _smsService.transactionBox.keys.firstWhere(
+        (key) => _smsService.transactionBox.get(key)?.transactionId == transactionId,
+        orElse: () => throw Exception('Transaction key not found'),
+      );
+
+      // Update the transaction in Hive
+      await _smsService.transactionBox.put(hiveKey, updatedTransaction);
+      log('Updated transaction $transactionId with type: $newType in local storage');
+    } catch (e) {
+      log('Error updating local transaction type: $e');
+      rethrow;
+    }
+  }
+
+  // Update transaction in the current list without full refresh
+  void _updateTransactionInList(String transactionId, String categoryId, String newType) {
+    setState(() {
+      for (int i = 0; i < _transactions.length; i++) {
+        final transaction = _transactions[i];
+        String currentId;
+        
+        if (_isPremium) {
+          currentId = (transaction as QueryDocumentSnapshot).id;
+        } else {
+          currentId = (transaction as sms.Transaction).transactionId;
+        }
+        
+        if (currentId == transactionId) {
+          if (_isPremium) {
+            // For premium users, remove it from the list since it's now categorized
+            _transactions.removeAt(i);
+          } else {
+            // For free users, update the local transaction object
+            final localTx = transaction as sms.Transaction;
+            final updatedTx = sms.Transaction(
+              type: newType,
+              amount: localTx.amount,
+              description: localTx.description,
+              date: localTx.date,
+              transactionId: localTx.transactionId,
+              rawSms: localTx.rawSms,
+              categoryId: categoryId,
+            );
+            _transactions[i] = updatedTx;
+          }
+          break;
+        }
+      }
+    });
+  }
+
+  // Remove transaction from the current list for premium users without restarting stream
+  void _removeTransactionFromList(String transactionId) {
+    setState(() {
+      for (int i = 0; i < _transactions.length; i++) {
+        final transaction = _transactions[i];
+        final currentId = (transaction as QueryDocumentSnapshot).id;
+        
+        if (currentId == transactionId) {
+          _transactions.removeAt(i);
+          _selectedTransactionIds.remove(transactionId);
+          break;
+        }
+      }
+    });
+  }
 }

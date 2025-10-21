@@ -35,6 +35,9 @@ class Transaction extends HiveObject {
   @HiveField(5)
   final String rawSms;
 
+  @HiveField(6)
+  final String? categoryId; // Added to track categorization
+
   Transaction({
     required this.type,
     required this.amount,
@@ -42,6 +45,7 @@ class Transaction extends HiveObject {
     required this.date,
     required this.transactionId,
     required this.rawSms,
+    this.categoryId, // Optional, null means uncategorized
   });
 
   Map<String, dynamic> toMap() {
@@ -52,7 +56,21 @@ class Transaction extends HiveObject {
       'date': date,
       'transactionId': transactionId,
       'rawSms': rawSms,
+      'categoryId': categoryId,
     };
+  }
+
+  // Create a copy with updated categoryId
+  Transaction withCategoryId(String? newCategoryId) {
+    return Transaction(
+      type: type,
+      amount: amount,
+      description: description,
+      date: date,
+      transactionId: transactionId,
+      rawSms: rawSms,
+      categoryId: newCategoryId,
+    );
   }
 }
 
@@ -327,6 +345,7 @@ class SmsService {
           date: msg.date!.toIso8601String(),
           transactionId: originalTransactionId,
           rawSms: msg.body ?? '',
+          categoryId: null, // Initially uncategorized
         );
         await _transactionBox.put(hiveKey, transaction);
         existingIds.add(originalTransactionId);
@@ -343,6 +362,7 @@ class SmsService {
           date: DateTime.now().toIso8601String(),
           transactionId: 'sync_key',
           rawSms: '',
+          categoryId: null,
         ));
     return newCount;
   }
@@ -616,6 +636,7 @@ class SmsService {
       date: msgDate.toIso8601String(),
       transactionId: transactionId,
       rawSms: body,
+      categoryId: null, // Initially uncategorized
     );
   }
 
@@ -741,6 +762,32 @@ class SmsService {
   }
 
   List<String> get keywords => List.unmodifiable(_cachedKeywords);
+
+  // Update local transaction with categoryId
+  Future<void> updateTransactionCategory(String transactionId, String? categoryId) async {
+    if (!_isInitialized) {
+      await init();
+    }
+
+    // Find the transaction in local storage by transactionId
+    final transaction = _transactionBox.values.firstWhere(
+      (t) => t.transactionId == transactionId,
+      orElse: () => throw Exception('Transaction not found in local storage'),
+    );
+
+    // Create updated transaction with new categoryId
+    final updatedTransaction = transaction.withCategoryId(categoryId);
+    
+    // Get the Hive key for this transaction
+    final hiveKey = _transactionBox.keys.firstWhere(
+      (key) => _transactionBox.get(key)?.transactionId == transactionId,
+      orElse: () => throw Exception('Transaction key not found'),
+    );
+
+    // Update the transaction in Hive
+    await _transactionBox.put(hiveKey, updatedTransaction);
+    log('Updated transaction $transactionId with categoryId: $categoryId in local storage');
+  }
 
   void dispose() {
     _stopSmsPolling();

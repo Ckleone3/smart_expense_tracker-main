@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "D:\\Softwares\\flutter\\packages\\flutter_tools\\gradle\\src\\main\\groovy\\CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "C:\\Users\\cheru\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+      "-C",
+      "D:\\AppDev\\LeoHub\\Flutter\\smart_expense_tracker-main\\smart_expense_tracker-main\\android\\app\\.cxx\\Debug\\2l4e715x\\x86",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "C:\\Users\\cheru\\AppData\\Local\\Android\\Sdk\\cmake\\3.22.1\\bin\\ninja.exe",
+    "-C",
+    "D:\\AppDev\\LeoHub\\Flutter\\smart_expense_tracker-main\\smart_expense_tracker-main\\android\\app\\.cxx\\Debug\\2l4e715x\\x86",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}

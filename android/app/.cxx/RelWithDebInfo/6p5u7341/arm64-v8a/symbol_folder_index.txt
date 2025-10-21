@@ -1,0 +1,1 @@
+D:\AppDev\LeoHub\Flutter\smart_expense_tracker-main\smart_expense_tracker-main\build\app\intermediates\cxx\RelWithDebInfo\6p5u7341\obj\arm64-v8a

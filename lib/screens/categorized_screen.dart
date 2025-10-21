@@ -122,13 +122,57 @@ class _CategorizedScreenState extends State<CategorizedScreen>
     return doc.exists ? (doc['currency'] as String? ?? 'Ksh') : 'Ksh';
   }
 
-  void _deleteTransaction(String transactionId, String userId) {
+  void _confirmDeleteIncomeAndAllocations(
+      BuildContext context,
+      String transactionId,
+      String description,
+      double amount,
+      String currency,
+      String userId) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Transaction'),
-        content:
-            const Text('Are you sure you want to delete this transaction?'),
+        title: const Text('Delete Income & Allocations'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Are you sure you want to delete this income transaction?'),
+            const SizedBox(height: 12),
+            const Text(
+              'This will also delete ALL related allocations for this income.',
+              style:
+                  TextStyle(fontWeight: FontWeight.w500, color: Colors.orange),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Description: $description',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Amount: $currency ${amount.toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Transaction ID: ${transactionId.substring(0, 12)}...',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'This action will permanently remove the income transaction and ALL its related allocations. This cannot be undone.',
+              style: TextStyle(
+                  color: Colors.red, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
@@ -138,72 +182,64 @@ class _CategorizedScreenState extends State<CategorizedScreen>
           TextButton(
             onPressed: () async {
               try {
-                await FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(userId)
-                    .collection('transactions')
-                    .doc(transactionId)
-                    .delete();
+                // Get all allocations for this transaction first
                 final allocationsSnapshot = await FirebaseFirestore.instance
                     .collection('users')
                     .doc(userId)
                     .collection('allocations')
                     .where('transactionId', isEqualTo: transactionId)
                     .get();
-                for (var doc in allocationsSnapshot.docs) {
-                  await doc.reference.delete();
-                }
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Transaction deleted')),
-                );
-                setState(() {});
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to delete: $e')),
-                );
-              }
-            },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 
-  void _deleteAllocation(String allocationId, String userId) async {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Allocation'),
-        content: const Text('Are you sure you want to delete this allocation?'),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              try {
-                await FirebaseFirestore.instance
+                final allocationCount = allocationsSnapshot.docs.length;
+
+                // Delete the income transaction and all related allocations
+                final batch = FirebaseFirestore.instance.batch();
+
+                // Delete the transaction
+                final transactionRef = FirebaseFirestore.instance
                     .collection('users')
                     .doc(userId)
-                    .collection('allocations')
-                    .doc(allocationId)
-                    .delete();
+                    .collection('transactions')
+                    .doc(transactionId);
+                batch.delete(transactionRef);
+
+                // Delete all related allocations
+                for (var allocationDoc in allocationsSnapshot.docs) {
+                  batch.delete(allocationDoc.reference);
+                }
+
+                await batch.commit();
+
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Allocation deleted')),
+                  SnackBar(
+                    content: Text(
+                        'Income deleted successfully along with $allocationCount allocation(s)'),
+                    backgroundColor: Colors.green,
+                  ),
                 );
-                setState(() {});
+
+                // Refresh the UI
+                setState(() {
+                  // Clear cached data to force refresh
+                  _cachedData = null;
+                });
+
+                // Refetch the data
+                _fetchInitialData();
               } catch (e) {
+                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to delete allocation: $e')),
+                  SnackBar(
+                    content: Text('Failed to delete income: $e'),
+                    backgroundColor: Colors.red,
+                  ),
                 );
               }
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Delete Income & Allocations',
+                style:
+                    TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -274,11 +310,6 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                             title: Text(allocData['categoryId']),
                             subtitle: Text(
                                 '${transactionData['currency']} ${(allocData['amount'] as num?)?.toDouble().toStringAsFixed(2) ?? '0.00'}'),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () =>
-                                  _deleteAllocation(alloc.id, userId),
-                            ),
                           );
                         }),
                       ],
@@ -927,7 +958,6 @@ class _CategorizedScreenState extends State<CategorizedScreen>
               final allocations = group.value;
               final totalAllocated = allocations.fold<double>(
                   0.0, (sum, alloc) => sum + alloc['amount']);
-
               return Card(
                 margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                 child: ExpansionTile(
@@ -942,7 +972,6 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                         color: Colors.white, size: 16),
                   ),
                   children: allocations.map((allocation) {
-                    final allocationId = allocation['id'];
                     final category = allocation['categoryId'];
                     final amount = allocation['amount'] as double;
                     final timestamp = allocation['timestamp'] as DateTime;
@@ -953,15 +982,6 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                       title: Text(category),
                       subtitle: Text(
                           '$currency ${amount.toStringAsFixed(2)} • $formattedDate'),
-                      trailing: Tooltip(
-                        message: 'Delete allocation',
-                        child: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () =>
-                              _deleteAllocation(allocationId, userId),
-                          tooltip: 'Delete allocation',
-                        ),
-                      ),
                     );
                   }).toList(),
                 ),
@@ -1295,15 +1315,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                       elevation: 2,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
-                      child: TransactionTile(
-                        type: 'Income',
-                        description: description,
-                        categoryId: categoryId,
-                        date: formattedDate,
-                        amount: amount,
-                        currency: currency,
-                        rawSms:
-                            transaction['rawSms'] as String? ?? 'No SMS data',
+                      child: ListTile(
                         leading: Semantics(
                           label: 'Income transaction',
                           child: Tooltip(
@@ -1315,7 +1327,41 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                             ),
                           ),
                         ),
-                        amountColor: Colors.green,
+                        title: Text(description),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Category: $categoryId'),
+                            Text('Date: $formattedDate'),
+                            Text(
+                                'Amount: $currency ${amount.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Tooltip(
+                              message:
+                                  'Delete income and all related allocations',
+                              child: IconButton(
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () =>
+                                    _confirmDeleteIncomeAndAllocations(
+                                        context,
+                                        transaction.id,
+                                        description,
+                                        amount,
+                                        currency,
+                                        userId),
+                                tooltip: 'Delete income and allocations',
+                              ),
+                            ),
+                          ],
+                        ),
                         onTap: () => _showTransactionDetails(
                           context,
                           {
@@ -1342,29 +1388,49 @@ class _CategorizedScreenState extends State<CategorizedScreen>
 
   Widget _buildPagination(int totalPages, String tabKey) {
     final currentTabPage = _tabPageNumbers[tabKey] ?? 0;
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: currentTabPage > 0
-                ? () =>
-                    setState(() => _tabPageNumbers[tabKey] = currentTabPage - 1)
-                : null,
-            tooltip: 'Previous page',
-          ),
-          Text('Page ${currentTabPage + 1} of $totalPages'),
-          IconButton(
-            icon: const Icon(Icons.arrow_forward),
-            onPressed: currentTabPage < totalPages - 1
-                ? () =>
-                    setState(() => _tabPageNumbers[tabKey] = currentTabPage + 1)
-                : null,
-            tooltip: 'Next page',
-          ),
-        ],
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+        margin: const EdgeInsets.only(bottom: 4.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: currentTabPage > 0
+                  ? () => setState(
+                      () => _tabPageNumbers[tabKey] = currentTabPage - 1)
+                  : null,
+              tooltip: 'Previous page',
+              padding: const EdgeInsets.all(8.0),
+              constraints: const BoxConstraints(
+                minWidth: 40,
+                minHeight: 40,
+              ),
+            ),
+            Flexible(
+              child: Text(
+                'Page ${currentTabPage + 1} of $totalPages',
+                style: const TextStyle(fontSize: 14),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.arrow_forward),
+              onPressed: currentTabPage < totalPages - 1
+                  ? () => setState(
+                      () => _tabPageNumbers[tabKey] = currentTabPage + 1)
+                  : null,
+              tooltip: 'Next page',
+              padding: const EdgeInsets.all(8.0),
+              constraints: const BoxConstraints(
+                minWidth: 40,
+                minHeight: 40,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
