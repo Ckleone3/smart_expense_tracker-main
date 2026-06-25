@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyALLbOyqABhxioVCUCmRSJAC8aSTq2kqz0',
-    appId: '1:886469902641:android:c3e828a2d3f04689d03010',
+    appId: '1:886469902641:android:8f8e551a85255be6d03010',
     messagingSenderId: '886469902641',
     projectId: 'smart-expense-tracker-c2236',
     storageBucket: 'smart-expense-tracker-c2236.firebasestorage.app',

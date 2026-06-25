@@ -149,16 +149,16 @@ class _CategorizedScreenState extends State<CategorizedScreen>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Description: $description',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('Amount: $currency ${amount.toStringAsFixed(2)}',
+                  Text('Amount: $currency ${NumberFormat('#,##0.00', 'en_US').format(amount)}',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   Text('Transaction ID: ${transactionId.substring(0, 12)}...',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -268,7 +268,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildDetailRow('Amount',
-                  '${transactionData['currency']} ${transactionData['amount'].toStringAsFixed(2)}'),
+                  '${transactionData['currency']} ${NumberFormat('#,##0.00', 'en_US').format(transactionData['amount'])}'),
               _buildDetailRow('Date', formattedDate),
               _buildDetailRow('Description', transactionData['description']),
               const SizedBox(height: 8),
@@ -309,7 +309,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                           return ListTile(
                             title: Text(allocData['categoryId']),
                             subtitle: Text(
-                                '${transactionData['currency']} ${(allocData['amount'] as num?)?.toDouble().toStringAsFixed(2) ?? '0.00'}'),
+                                '${transactionData['currency']} ${allocData['amount'] != null ? NumberFormat('#,##0.00', 'en_US').format(allocData['amount']) : '0.00'}'),
                           );
                         }),
                       ],
@@ -383,7 +383,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Categorized Transactions'),
+        title: const Text('Sorted Transactions'),
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
@@ -601,7 +601,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                                'Total: $currency ${categoryTotal.toStringAsFixed(2)}',
+                                'Total: $currency ${NumberFormat('#,##0.00', 'en_US').format(categoryTotal)}',
                                 style: TextStyle(
                                     color: type == 'Income'
                                         ? Colors.green
@@ -609,7 +609,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                             if (balances != null &&
                                 balances.containsKey(category))
                               Text(
-                                  'Balance: $currency ${balances[category]!.toStringAsFixed(2)}',
+                                  'Balance: $currency ${NumberFormat('#,##0.00', 'en_US').format(balances[category]!)}',
                                   style: TextStyle(
                                       color: balances[category]! >= 0
                                           ? Colors.blue
@@ -738,12 +738,12 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                                           horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: balance >= 0
-                                            ? Colors.green.withOpacity(0.1)
-                                            : Colors.red.withOpacity(0.1),
+                                            ? Colors.green.withValues(alpha: 0.1)
+                                            : Colors.red.withValues(alpha: 0.1),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
-                                        '$currency ${balance.toStringAsFixed(0)}',
+                                        '$currency ${NumberFormat('#,##0', 'en_US').format(balance)}',
                                         style: TextStyle(
                                           color: balance >= 0
                                               ? Colors.green
@@ -772,7 +772,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                                           ),
                                         ),
                                         Text(
-                                          '$currency ${categoryTotal.toStringAsFixed(0)}',
+                                          '$currency ${NumberFormat('#,##0', 'en_US').format(categoryTotal)}',
                                           style: const TextStyle(
                                             color: Colors.red,
                                             fontSize: 12,
@@ -793,7 +793,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                                           ),
                                         ),
                                         Text(
-                                          '$currency ${allocated.toStringAsFixed(0)}',
+                                          '$currency ${NumberFormat('#,##0', 'en_US').format(allocated)}',
                                           style: const TextStyle(
                                             color: Colors.blue,
                                             fontSize: 12,
@@ -805,7 +805,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                                   ],
                                 ),
                                 Text(
-                                    'Balance: $currency ${balance.toStringAsFixed(2)}',
+                                    'Balance: $currency ${NumberFormat('#,##0.00', 'en_US').format(balance)}',
                                     style: TextStyle(
                                         color: balance >= 0
                                             ? Colors.green
@@ -964,7 +964,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                   title: Text(
                       'Transaction ID: ${transactionId.substring(0, 8)}...'),
                   subtitle: Text(
-                      'Total: $currency ${totalAllocated.toStringAsFixed(2)}',
+                      'Total: $currency ${NumberFormat('#,##0.00', 'en_US').format(totalAllocated)}',
                       style: const TextStyle(color: Colors.blue)),
                   leading: const CircleAvatar(
                     backgroundColor: Colors.blue,
@@ -981,7 +981,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                     return ListTile(
                       title: Text(category),
                       subtitle: Text(
-                          '$currency ${amount.toStringAsFixed(2)} • $formattedDate'),
+                          '$currency ${NumberFormat('#,##0.00', 'en_US').format(amount)} • $formattedDate'),
                     );
                   }).toList(),
                 ),
@@ -1116,7 +1116,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                             Text('Category: $categoryId'),
                             Text('Date: $formattedDate'),
                             Text(
-                                'Amount: $currency ${amount.toStringAsFixed(2)}'),
+                                'Amount: $currency ${NumberFormat('#,##0.00', 'en_US').format(amount)}'),
                           ],
                         ),
                         trailing: Row(
@@ -1334,7 +1334,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                             Text('Category: $categoryId'),
                             Text('Date: $formattedDate'),
                             Text(
-                                'Amount: $currency ${amount.toStringAsFixed(2)}',
+                                'Amount: $currency ${NumberFormat('#,##0.00', 'en_US').format(amount)}',
                                 style: const TextStyle(
                                     color: Colors.green,
                                     fontWeight: FontWeight.bold)),
@@ -1467,7 +1467,7 @@ class TransactionTile extends StatelessWidget {
     // Minimum tap target size for accessibility
     return Semantics(
       label:
-          '$type transaction: $description, category $categoryId, amount $currency ${amount.toStringAsFixed(2)}, date $date',
+          '$type transaction: $description, category $categoryId, amount $currency ${NumberFormat('#,##0.00', 'en_US').format(amount)}, date $date',
       button: true,
       child: Material(
         color: Colors.transparent,
@@ -1528,7 +1528,7 @@ class TransactionTile extends StatelessWidget {
                 const SizedBox(width: 8),
                 ExcludeSemantics(
                   child: Text(
-                    '$currency ${amount.toStringAsFixed(2)}',
+                    '$currency ${NumberFormat('#,##0.00', 'en_US').format(amount)}',
                     style: TextStyle(
                       color: amountColor ??
                           (type == 'Income' ? Colors.green : Colors.red),

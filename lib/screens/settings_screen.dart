@@ -5,6 +5,8 @@ import 'package:smart_expense_tracker/screens/category_screen.dart';
 import 'package:smart_expense_tracker/keyword_settings_screen.dart';
 import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
 import 'package:smart_expense_tracker/screens/subscription_screen.dart';
+import 'package:smart_expense_tracker/screens/ledger_screen.dart';
+import 'package:smart_expense_tracker/screens/privacy_policy_screen.dart';
 
 import '../services/storage/storage_service.dart';
 
@@ -38,12 +40,30 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           ListTile(
+            leading: const Icon(Icons.receipt_long),
+            title: const Text('Ledger'),
+            subtitle: const Text('Auto-tracked payments from SMS, export to CSV'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const LedgerScreen()),
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.monetization_on),
             title: const Text('Manage Currency'),
             subtitle: const Text('Set your preferred currency'),
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const CurrencySettingsScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: const Text('Privacy Policy'),
+            subtitle: const Text('How your data and SMS are handled'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
             ),
           ),
           ListTile(

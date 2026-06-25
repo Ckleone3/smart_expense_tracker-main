@@ -56,6 +56,50 @@
           ]
         }
       }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:886469902641:android:8f8e551a85255be6d03010",
+        "android_client_info": {
+          "package_name": "com.leohub.smartexpensetracker"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "886469902641-8f5fsnqdj1bmtn9i0skddo8gejndn989.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.leohub.smartexpensetracker",
+            "certificate_hash": "4c29ae3193e8a5dae35e153d165a3bcf8790df71"
+          }
+        },
+        {
+          "client_id": "886469902641-rrmcu51pfae35dn2nvq90b2umdaia0n5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALLbOyqABhxioVCUCmRSJAC8aSTq2kqz0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "886469902641-rrmcu51pfae35dn2nvq90b2umdaia0n5.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "886469902641-87arom849duki0gaaq266795tv4p6946.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.smartExpenseTracker"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "configuration_version": "1"

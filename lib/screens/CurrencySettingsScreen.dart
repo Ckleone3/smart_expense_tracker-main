@@ -101,7 +101,7 @@ class _CurrencySettingsScreenState extends State<CurrencySettingsScreen> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: _selectedCurrency,
+              initialValue: _selectedCurrency,
               decoration: const InputDecoration(
                 labelText: 'Currency',
                 border: OutlineInputBorder(),

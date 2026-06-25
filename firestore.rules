@@ -1,0 +1,44 @@
+rules_version = '2';
+
+// Smart Expense Tracker — Firestore security rules.
+//
+// Deploy with:  firebase deploy --only firestore:rules
+// (or paste into Firebase console → Firestore Database → Rules)
+//
+// Key guarantees:
+//  • A user can only read/write their OWN data.
+//  • Nobody can make themselves Premium from the app — the subscription
+//    status is read-only to clients and may only be written by the backend
+//    (a Cloud Function / Admin SDK, which bypasses these rules).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      // The user document itself.
+      allow read, write: if isOwner(userId);
+
+      // Subscription status — clients may READ but never WRITE.
+      // Premium is granted only by the payment backend (Admin SDK bypasses rules).
+      match /subscription/{doc} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      // All other per-user collections: owner only.
+      match /categories/{doc}   { allow read, write: if isOwner(userId); }
+      match /allocations/{doc}  { allow read, write: if isOwner(userId); }
+      match /settings/{doc}     { allow read, write: if isOwner(userId); }
+      match /summary/{doc}      { allow read, write: if isOwner(userId); }
+      match /transactions/{doc} { allow read, write: if isOwner(userId); }
+      match /sms_keywords/{doc} { allow read, write: if isOwner(userId); }
+    }
+
+    // NOTE: review the top-level 'expenses' collection used by
+    // expense_list_screen.dart — it is not scoped per-user. Consider moving it
+    // under /users/{uid}/expenses. Until then it is denied by default (no rule).
+  }
+}

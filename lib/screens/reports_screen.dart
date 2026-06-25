@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart';
 import 'dart:developer';
 
 class ReportsScreen extends StatelessWidget {
@@ -219,7 +220,7 @@ class ReportsScreen extends StatelessWidget {
                                   const Icon(Icons.arrow_downward, color: Colors.green, size: 20),
                                   const SizedBox(width: 8),
                                   Text(
-                                    'Total Income: $currency ${totalIncome.toStringAsFixed(2)}',
+                                    'Total Income: $currency ${NumberFormat('#,##0.00', 'en_US').format(totalIncome)}',
                                     style: const TextStyle(
                                       fontSize: 16,
                                       color: Colors.green,
@@ -234,7 +235,7 @@ class ReportsScreen extends StatelessWidget {
                                   const Icon(Icons.arrow_upward, color: Colors.red, size: 20),
                                   const SizedBox(width: 8),
                                   Text(
-                                    'Total Expenses: $currency ${totalExpense.toStringAsFixed(2)}',
+                                    'Total Expenses: $currency ${NumberFormat('#,##0.00', 'en_US').format(totalExpense)}',
                                     style: const TextStyle(
                                       fontSize: 16,
                                       color: Colors.red,
@@ -252,7 +253,7 @@ class ReportsScreen extends StatelessWidget {
                                   const Icon(Icons.calculate, color: Colors.purple, size: 20),
                                   const SizedBox(width: 8),
                                   Text(
-                                    'Net Balance: $currency ${(totalIncome - totalExpense).toStringAsFixed(2)}',
+                                    'Net Balance: $currency ${NumberFormat('#,##0.00', 'en_US').format(totalIncome - totalExpense)}',
                                     style: const TextStyle(
                                       fontSize: 16, 
                                       fontWeight: FontWeight.bold,
@@ -267,7 +268,7 @@ class ReportsScreen extends StatelessWidget {
                                   const Icon(Icons.account_balance_wallet, color: Colors.blue, size: 20),
                                   const SizedBox(width: 8),
                                   Text(
-                                    'Available Balance: $currency ${balances.values.fold<double>(0.0, (sum, b) => sum + b).toStringAsFixed(2)}',
+                                    'Available Balance: $currency ${NumberFormat('#,##0.00', 'en_US').format(balances.values.fold<double>(0.0, (sum, b) => sum + b))}',
                                     style: const TextStyle(
                                       fontSize: 16,
                                       color: Colors.blue,
@@ -473,7 +474,7 @@ class ReportsScreen extends StatelessWidget {
             backDrawRodData: BackgroundBarChartRodData(
               show: true,
               toY: totalIncome * 1.1, // Now accessible
-              color: incomeColor.withOpacity(0.1),
+              color: incomeColor.withValues(alpha: 0.1),
             ),
           ),
           BarChartRodData(
@@ -484,7 +485,7 @@ class ReportsScreen extends StatelessWidget {
             backDrawRodData: BackgroundBarChartRodData(
               show: true,
               toY: totalExpense * 1.1, // Now accessible
-              color: expenseColor.withOpacity(0.1),
+              color: expenseColor.withValues(alpha: 0.1),
             ),
           ),
         ],

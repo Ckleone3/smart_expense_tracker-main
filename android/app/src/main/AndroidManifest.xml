@@ -1,12 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.smart_expense_tracker">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Permissions for SMS functionality -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- Required to post rent-payment notifications on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:label="smart_expense_tracker"
+        android:label="Smart Expense Tracker"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         
@@ -27,6 +28,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Captures rent-payment SMS even when the app is closed -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Flutter embedding meta-data -->
         <meta-data

@@ -15,7 +15,7 @@ import 'package:smart_expense_tracker/services/subscription_service.dart';
 
 part 'sms_service.g.dart';
 
-@HiveType(typeId: 0)
+@HiveType(typeId: 1)
 class Transaction extends HiveObject {
   @HiveField(0)
   final String type;
@@ -130,10 +130,18 @@ class SmsService {
   Future<void> init() async {
     if (_isInitialized) return;
     await Hive.initFlutter();
-    if (!Hive.isAdapterRegistered(0)) {
+    if (!Hive.isAdapterRegistered(1)) {
       Hive.registerAdapter(TransactionAdapter());
     }
-    _transactionBox = await Hive.openBox<Transaction>(_transactionBoxName);
+    try {
+      _transactionBox = await Hive.openBox<Transaction>(_transactionBoxName);
+    } catch (e) {
+      // Older builds stored Transactions under typeId 0 (clashing with Expense).
+      // The box is a rebuildable SMS cache, so drop it and let it re-sync.
+      log('Transaction box incompatible ($e); rebuilding from SMS');
+      await Hive.deleteBoxFromDisk(_transactionBoxName);
+      _transactionBox = await Hive.openBox<Transaction>(_transactionBoxName);
+    }
     await _loadKeywords(); // Load keywords during initialization
     _isInitialized = true;
     log('SmsService initialized with ${_cachedKeywords.length} keywords');

@@ -20,8 +20,8 @@ plugins {
     // Flutter’s loader
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
 
-    // Android Gradle Plugin (must be ≥8.2.1 for Java 21+)
-    id "com.android.application" version "8.3.2" apply false
+    // Android Gradle Plugin (Flutter requires ≥8.6.0)
+    id "com.android.application" version "8.6.0" apply false
 
     // Firebase / Google services
     id "com.google.gms.google-services" version "4.3.15" apply false

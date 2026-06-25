@@ -402,7 +402,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Uncategorized — ${DateFormat('dd/MM/yyyy').format(_selectedDate)}',
+          'To Sort — ${DateFormat('dd/MM/yyyy').format(_selectedDate)}',
         ),
         actions: [
           IconButton(
@@ -566,7 +566,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       elevation: 2,
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: isSelected ? Colors.blue.withOpacity(0.2) : null,
+      color: isSelected ? Colors.blue.withValues(alpha: 0.2) : null,
       child: ListTile(
         leading: isCurrentlyCategorizing
             ? const SizedBox(

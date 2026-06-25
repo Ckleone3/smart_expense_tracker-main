@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Your subscription tiers.
 enum SubscriptionTier {
@@ -74,8 +75,22 @@ class SubscriptionService extends ChangeNotifier {
     });
   }
 
-  /// Returns true if the first event on the tierStream is premium
+  /// True while a local free trial is still within its 7-day window.
+  /// The trial is stored only on-device — it never grants paid premium in
+  /// Firestore, so it can't be used to fake a paid subscription.
+  Future<bool> isInTrial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final startStr = prefs.getString('trial_start');
+    if (startStr == null) return false;
+    final start = DateTime.tryParse(startStr);
+    if (start == null) return false;
+    return DateTime.now().difference(start) < const Duration(days: 7);
+  }
+
+  /// Premium access = a real paid tier (granted only by the backend) OR an
+  /// active local trial.
   Future<bool> hasPremiumFeatures() async {
+    if (await isInTrial()) return true;
     final tier = await tierStream().first;
     return tier == SubscriptionTier.premium;
   }

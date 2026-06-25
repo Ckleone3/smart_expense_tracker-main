@@ -8,7 +8,7 @@ part of 'sms_service.dart';
 
 class TransactionAdapter extends TypeAdapter<Transaction> {
   @override
-  final int typeId = 0;
+  final int typeId = 1;
 
   @override
   Transaction read(BinaryReader reader) {

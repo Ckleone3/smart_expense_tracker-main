@@ -11,13 +11,14 @@ import 'package:smart_expense_tracker/screens/uncategorized_screen.dart';
 import 'package:smart_expense_tracker/screens/reports_screen.dart';
 import 'package:smart_expense_tracker/screens/settings_screen.dart';
 import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
+import 'package:smart_expense_tracker/screens/privacy_policy_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:smart_expense_tracker/widgets/custom_widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:smart_expense_tracker/screens/dashboard_screen.dart';
+import 'package:smart_expense_tracker/screens/ledger_screen.dart';
 
 import 'firebase_options.dart';
 import 'services/storage/storage_service.dart';
@@ -91,13 +92,6 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   late SmsService _smsService;
 
-  static final List<Widget> _screens = [
-    const DashboardScreen(),
-    const UncategorizedScreen(),
-    const CategorizedScreen(),
-    const ReportsScreen(),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -105,43 +99,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final prefs = await SharedPreferences.getInstance();
+
+      // Privacy consent gate — must be accepted before any SMS access.
+      final privacyAccepted = prefs.getBool('privacy_accepted') ?? false;
+      if (!privacyAccepted) {
+        final agreed = await _showConsentDialog();
+        if (agreed != true) {
+          // Declined — sign out and return to welcome; no SMS is read.
+          await FirebaseAuth.instance.signOut();
+          await GoogleSignIn().signOut();
+          return;
+        }
+        await prefs.setBool('privacy_accepted', true);
+      }
+
       final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
 
       if (!hasSeenOnboarding) {
         await prefs.setBool('hasSeenOnboarding', true);
-
+        if (!mounted) return;
+        // Just the tutorial on first run — the free trial is now offered
+        // calmly from the Subscription screen instead of a pop-up here.
         await Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const TutorialScreen()),
         );
-
-        final startTrial = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Try Premium free for 7 days?'),
-            content: const Text(
-              'Get cloud sync, cross-device access, and advanced reports for 7 days.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('No, thanks'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Start Trial'),
-              ),
-            ],
-          ),
-        );
-
-        if (startTrial == true) {
-          await prefs.setString(
-            'trial_start',
-            DateTime.now().toIso8601String(),
-          );
-          await context.read<SubscriptionService>().upgradeToPremium();
-        }
       }
 
       // After your existing onboarding/trial prompt block:
@@ -152,11 +134,11 @@ class _HomeScreenState extends State<HomeScreen> {
         final start = DateTime.parse(trialStr);
         final elapsed = DateTime.now().difference(start);
         if (elapsed >= const Duration(days: 7)) {
-          // Trial has ended!
-          await context.read<SubscriptionService>().downgradeToFree();
+          // Trial has ended — just clear the local marker.
           await prefs.remove('trial_start');
+          if (!mounted) return;
           // Let the user know
-          showDialog(
+          await showDialog(
             context: context,
             builder: (_) => AlertDialog(
               title: const Text('Trial Ended'),
@@ -184,18 +166,61 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
+  Future<bool?> _showConsentDialog() {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Your privacy & SMS access'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This app reads your transaction SMS (like M-Pesa and bank '
+                'alerts) to track your money automatically.\n\n'
+                '• OTPs and personal chats are ignored.\n'
+                '• Your data stays on your phone (cloud backup only for Premium).\n'
+                '• We never sell your data.\n\n'
+                'You must agree to continue.',
+              ),
+              TextButton(
+                onPressed: () => Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                      builder: (_) => const PrivacyPolicyScreen()),
+                ),
+                child: const Text('Read full privacy policy'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Decline'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('I Agree'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _initializeServiceAndSync() async {
     try {
       await _smsService.init();
-      final newMessages = await _smsService.initializeSmsStore();
-      if (newMessages > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Stored $newMessages new SMS messages')),
-        );
-      }
+      // Sync silently on startup — no noisy "stored N messages" snackbar.
+      await _smsService.initializeSmsStore();
     } catch (e) {
+      debugPrint('Initial SMS sync failed: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error during initial SMS sync: $e')),
+        const SnackBar(
+          content: Text("Couldn't sync your messages right now. Pull down to retry."),
+        ),
       );
     }
   }
@@ -411,8 +436,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (e.toString().contains('NO_KEYWORDS_AVAILABLE')) {
         _showNoKeywordsDialog(context);
       } else {
+        debugPrint('Fetch transactions failed: $e');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error fetching transactions: $e')),
+          const SnackBar(
+            content: Text("Couldn't fetch transactions. Please try again."),
+          ),
         );
       }
     }
@@ -549,7 +577,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(
                       labelText: 'Type', border: OutlineInputBorder()),
-                  value: type,
+                  initialValue: type,
                   items: ['Income', 'Expense']
                       .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                       .toList(),
@@ -604,7 +632,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: const InputDecoration(
                             labelText: 'Category (Optional)',
                             border: OutlineInputBorder()),
-                        value: selCat,
+                        initialValue: selCat,
                         items: snap.data!
                             .map((c) =>
                                 DropdownMenuItem(value: c, child: Text(c)))
@@ -669,8 +697,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                         content: Text('Transaction added successfully')));
                   } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text('Failed to add transaction: $e')));
+                    debugPrint('Add transaction failed: $e');
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text("Couldn't add the transaction. Please try again.")));
                   }
                 },
                 child: const Text('Add')),
@@ -682,86 +711,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: SmartAppBar(
-        title: 'Smart Expense Tracker',
-        actions: [
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            tooltip: 'More options',
-            onSelected: (value) {
-              switch (value) {
-                case 'fetch':
-                  _showFetchOptions(context);
-                  break;
-                case 'add':
-                  _addManualTransaction(context);
-                  break;
-                case 'settings':
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const SettingsScreen()));
-                  break;
-                case 'logout':
-                  _handleLogout(context);
-                  break;
-              }
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem<String>(
-                value: 'fetch',
-                child: Row(
-                  children: [
-                    Icon(Icons.refresh,
-                        color: Colors.blue, size: 20),
-                    SizedBox(width: 8),
-                    Text('Fetch SMS'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                  value: 'add',
-                  child: Row(children: [
-                    Icon(Icons.add,
-                        color: Colors.green, size: 20),
-                    SizedBox(width: 8),
-                    Text('Add Cash')
-                  ])),
-              const PopupMenuItem(
-                  value: 'settings',
-                  child: Row(children: [
-                    Icon(Icons.settings,
-                        color: Colors.grey, size: 20),
-                    SizedBox(width: 8),
-                    Text('Settings')
-                  ])),
-              const PopupMenuItem(
-                  value: 'logout',
-                  child: Row(children: [
-                    Icon(Icons.logout,
-                        color: Colors.red, size: 20),
-                    SizedBox(width: 8),
-                    Text('Logout')
-                  ])),
-            ],
-          )
-        ],
+    // Each tab provides its own app bar — Home carries the global actions
+    // (Settings, Add cash, Fetch SMS, Logout) so there's a single app bar.
+    final screens = <Widget>[
+      DashboardScreen(
+        onAddCash: () => _addManualTransaction(context),
+        onFetchSms: () => _showFetchOptions(context),
+        onLogout: () => _handleLogout(context),
       ),
-      body: Stack(
-          children: _screens
-              .asMap()
-              .entries
-              .map((e) => e.key == _selectedIndex ? e.value : Container())
-              .toList()),
+      const UncategorizedScreen(),
+      const CategorizedScreen(),
+      const LedgerScreen(),
+      const ReportsScreen(),
+    ];
+    return Scaffold(
+      // IndexedStack keeps each tab alive, so switching tabs is instant and
+      // preserves scroll position / loaded data instead of rebuilding.
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: screens,
+      ),
       bottomNavigationBar: BottomNavigationBar(
         items: const [
           BottomNavigationBarItem(
-              icon: Icon(Icons.dashboard), label: 'Dashboard'),
+              icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(
-              icon: Icon(Icons.list_alt), label: 'Uncategorized'),
+              icon: Icon(Icons.inbox), label: 'To Sort'),
           BottomNavigationBarItem(
-              icon: Icon(Icons.category), label: 'Categorized'),
+              icon: Icon(Icons.check_circle), label: 'Sorted'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.receipt_long), label: 'Ledger'),
           BottomNavigationBarItem(
               icon: Icon(Icons.bar_chart), label: 'Reports'),
         ],
