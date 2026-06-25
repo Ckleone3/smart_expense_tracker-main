@@ -51,7 +51,9 @@ android {
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
             // To enable code shrinking and obfuscation, uncomment:
             // minifyEnabled true
             // proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
