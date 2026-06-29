@@ -35,12 +35,15 @@ class _BusinessManagerScreenState extends State<BusinessManagerScreen> {
   }
 
   Future<void> _addOrEdit({Business? existing, String? prefillKeyword}) async {
-    final result = await showDialog<Business>(
-      context: context,
-      builder: (_) => _BusinessDialog(
-        service: _service,
-        existing: existing,
-        prefillKeyword: prefillKeyword,
+    final result = await Navigator.push<Business>(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => BusinessEditScreen(
+          service: _service,
+          existing: existing,
+          prefillKeyword: prefillKeyword,
+        ),
       ),
     );
     if (result != null) {
@@ -197,18 +200,21 @@ class _BusinessManagerScreenState extends State<BusinessManagerScreen> {
   }
 }
 
-class _BusinessDialog extends StatefulWidget {
+/// Full-screen Add/Edit business form. A normal page (not a dialog) so the
+/// keyboard opens/closes smoothly without the dialog-resize jank.
+class BusinessEditScreen extends StatefulWidget {
   final BusinessService service;
   final Business? existing;
   final String? prefillKeyword;
 
-  const _BusinessDialog({required this.service, this.existing, this.prefillKeyword});
+  const BusinessEditScreen(
+      {super.key, required this.service, this.existing, this.prefillKeyword});
 
   @override
-  State<_BusinessDialog> createState() => _BusinessDialogState();
+  State<BusinessEditScreen> createState() => _BusinessEditScreenState();
 }
 
-class _BusinessDialogState extends State<_BusinessDialog> {
+class _BusinessEditScreenState extends State<BusinessEditScreen> {
   late final TextEditingController _name;
   late final TextEditingController _keywords;
 
@@ -232,44 +238,51 @@ class _BusinessDialogState extends State<_BusinessDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.existing == null ? 'Add business' : 'Edit business'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _name,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Business name',
-                hintText: 'e.g. Cheruiyot Rentals',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _keywords,
-              minLines: 2,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: 'Keywords (one per line)',
-                hintText: 'e.g. ANNE-577715',
-                helperText: 'Words/accounts that appear in this business’s SMS',
-              ),
-            ),
-          ],
-        ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.existing == null ? 'Add business' : 'Edit business'),
+        actions: [
+          TextButton(
+            onPressed: _save,
+            child: const Text('SAVE',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: _save,
-          child: const Text('Save'),
-        ),
-      ],
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          TextField(
+            controller: _name,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(
+              labelText: 'Business name',
+              hintText: 'e.g. Cheruiyot Rentals',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _keywords,
+            minLines: 3,
+            maxLines: 8,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Keywords (one per line)',
+              hintText: 'e.g. ANNE-577715\nLOOP Ref',
+              helperText: 'Words/accounts that appear in this business’s payment SMS',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save),
+            label: const Text('Save business'),
+          ),
+        ],
+      ),
     );
   }
 

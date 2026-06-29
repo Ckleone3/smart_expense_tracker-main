@@ -7,6 +7,8 @@ import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
 import 'package:smart_expense_tracker/screens/subscription_screen.dart';
 import 'package:smart_expense_tracker/screens/ledger_screen.dart';
 import 'package:smart_expense_tracker/screens/privacy_policy_screen.dart';
+import 'package:smart_expense_tracker/screens/admin_license_screen.dart';
+import 'package:smart_expense_tracker/services/license_service.dart';
 
 import '../services/storage/storage_service.dart';
 
@@ -21,6 +23,20 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          if (isAdminUser())
+            Card(
+              color: Colors.indigo.shade50,
+              child: ListTile(
+                leading: const Icon(Icons.admin_panel_settings,
+                    color: Colors.indigo),
+                title: const Text('Admin — Activation Keys'),
+                subtitle: const Text('Generate & manage client keys'),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => AdminLicenseScreen()),
+                ),
+              ),
+            ),
           ListTile(
             leading: const Icon(Icons.category),
             title: const Text('Manage Categories'),

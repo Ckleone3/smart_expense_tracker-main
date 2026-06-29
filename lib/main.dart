@@ -12,6 +12,8 @@ import 'package:smart_expense_tracker/screens/reports_screen.dart';
 import 'package:smart_expense_tracker/screens/settings_screen.dart';
 import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
 import 'package:smart_expense_tracker/screens/privacy_policy_screen.dart';
+import 'package:smart_expense_tracker/screens/activation_screen.dart';
+import 'package:smart_expense_tracker/services/license_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -68,7 +70,7 @@ class MyApp extends StatelessWidget {
               return const Center(child: CircularProgressIndicator());
             }
             if (snapshot.hasData) {
-              return const HomeScreen();
+              return const _ActivationGate();
             }
             return const WelcomeScreen();
           },
@@ -78,6 +80,40 @@ class MyApp extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+/// Gates the app behind a one-off, device-locked activation key.
+class _ActivationGate extends StatefulWidget {
+  const _ActivationGate();
+
+  @override
+  State<_ActivationGate> createState() => _ActivationGateState();
+}
+
+class _ActivationGateState extends State<_ActivationGate> {
+  final LicenseService _license = LicenseService();
+  bool? _activated;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    // The developer/owner account skips activation so it can always manage keys.
+    final ok = isAdminUser() || await _license.isActivated();
+    if (mounted) setState(() => _activated = ok);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_activated == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_activated!) return const HomeScreen();
+    return ActivationScreen(onActivated: () => setState(() => _activated = true));
   }
 }
 
@@ -725,11 +761,22 @@ class _HomeScreenState extends State<HomeScreen> {
       const ReportsScreen(),
     ];
     return Scaffold(
-      // IndexedStack keeps each tab alive, so switching tabs is instant and
-      // preserves scroll position / loaded data instead of rebuilding.
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: screens,
+      // Lazy stack: keeps every tab's STATE alive (no reload on switch) but
+      // skips layout/paint for hidden tabs via Offstage. This stops the heavy
+      // off-screen tabs (charts, lists) from re-laying-out on every frame of
+      // the keyboard animation, which was causing slow-motion keyboard resize.
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          for (int i = 0; i < screens.length; i++)
+            Offstage(
+              offstage: _selectedIndex != i,
+              child: TickerMode(
+                enabled: _selectedIndex == i,
+                child: screens[i],
+              ),
+            ),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         items: const [

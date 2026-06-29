@@ -5,8 +5,6 @@ import 'dart:convert'; // For MD5 hashing
 import 'package:crypto/crypto.dart'; // For MD5 hashing
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart' as smsInbox;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -218,54 +216,24 @@ class SmsService {
   Future<int> _fullSmsSync() async {
     if (!await _checkAndRequestSmsPermission()) return 0;
 
-    final sixMonthsAgo = DateTime.now().subtract(Duration(days: 180));
-    int totalNewMessages = 0;
-    DateTime? oldestDateFetched = DateTime.now();
-    bool hasMore = true;
+    final sixMonthsAgo = DateTime.now().subtract(const Duration(days: 180));
 
-    final rootIsolateToken = RootIsolateToken.instance;
-
-    while (hasMore && oldestDateFetched!.isAfter(sixMonthsAgo)) {
-      final messages = await compute(_fetchSmsBatchIsolate, {
-        'smsQuery': _smsQuery,
-        'startDate': oldestDateFetched,
-        'batchSize': _batchSize,
-        'rootIsolateToken': rootIsolateToken,
-      });
-
-      if (messages.isEmpty) {
-        hasMore = false;
-        break;
-      }
-
-      final newCount = await _saveAllSmsToStore(messages);
-      totalNewMessages += newCount;
-
-      oldestDateFetched = messages.last.date;
-      log('Fetched batch: ${messages.length} messages, $newCount new, oldest: $oldestDateFetched');
-    }
-
-    return totalNewMessages;
-  }
-
-  static Future<List<smsInbox.SmsMessage>> _fetchSmsBatchIsolate(
-      Map<String, dynamic> params) async {
-    final RootIsolateToken? rootIsolateToken = params['rootIsolateToken'];
-    if (rootIsolateToken != null) {
-      BackgroundIsolateBinaryMessenger.ensureInitialized(rootIsolateToken);
-    }
-
-    final smsInbox.SmsQuery smsQuery = params['smsQuery'];
-    final DateTime startDate = params['startDate'];
-    final int batchSize = params['batchSize'];
-
-    return await smsQuery.querySms(
+    // Query directly on the main isolate. Passing the SMS plugin across a
+    // background isolate (compute) is unreliable in release/AOT builds and
+    // silently returned nothing there, so the first-run sync loaded no SMS.
+    final messages = await _smsQuery.querySms(
       kinds: [smsInbox.SmsQueryKind.inbox, smsInbox.SmsQueryKind.sent],
       sort: true,
-      count: batchSize,
-    ).then((messages) => messages
-        .where((msg) => msg.date != null && msg.date!.isBefore(startDate))
-        .toList());
+      count: 2000,
+    );
+
+    final recent = messages
+        .where((msg) => msg.date != null && msg.date!.isAfter(sixMonthsAgo))
+        .toList();
+
+    final newCount = await _saveAllSmsToStore(recent);
+    log('Full sync stored $newCount of ${messages.length} fetched messages');
+    return newCount;
   }
 
   Future<int> _incrementalSmsSync(DateTime lastSyncDate) async {

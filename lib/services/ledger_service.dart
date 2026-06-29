@@ -34,6 +34,7 @@ class LedgerService {
 
   Future<Box<RentPayment>> _open() async {
     if (_box != null && _box!.isOpen) return _box!;
+    await Hive.initFlutter(); // safe to call repeatedly; ensures init in release
     if (!Hive.isAdapterRegistered(10)) {
       Hive.registerAdapter(RentPaymentAdapter());
     }
@@ -164,10 +165,15 @@ class LedgerService {
   }
 
   /// Requests POST_NOTIFICATIONS (Android 13+) so capture alerts can show.
+  /// Non-critical and tolerant: permission_handler only allows one request at a
+  /// time, so if another screen is mid-request this must not break the ledger.
   Future<void> ensureNotificationPermission() async {
-    final status = await Permission.notification.status;
-    if (!status.isGranted) {
-      await Permission.notification.request();
+    try {
+      if (!await Permission.notification.isGranted) {
+        await Permission.notification.request();
+      }
+    } catch (_) {
+      // A permission request is already running elsewhere — ignore.
     }
   }
 }

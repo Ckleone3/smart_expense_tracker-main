@@ -1,6 +1,7 @@
 package com.leohub.smartexpensetracker
 
 import android.content.Context
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -30,6 +31,13 @@ class MainActivity : FlutterActivity() {
                             .putStringSet("match_keywords", keywords.toSet())
                             .apply()
                         result.success(true)
+                    }
+                    // Stable per-device id used to lock an activation key to one phone.
+                    "getDeviceId" -> {
+                        val id = Settings.Secure.getString(
+                            contentResolver, Settings.Secure.ANDROID_ID
+                        )
+                        result.success(id ?: "")
                     }
                     else -> result.notImplemented()
                 }

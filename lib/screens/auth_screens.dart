@@ -1,7 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:smart_expense_tracker/main.dart';
+
+/// Works around the known firebase_auth "PigeonUserDetails" type-cast bug:
+/// the native sign-in succeeds, but deserializing the returned user throws a
+/// `type 'List<Object?>' is not a subtype of type 'PigeonUserDetails?'` error.
+/// Returns true if the user is actually signed in despite that error.
+Future<bool> _signedInDespiteError() async {
+  if (FirebaseAuth.instance.currentUser != null) return true;
+  final user = await FirebaseAuth.instance
+      .authStateChanges()
+      .firstWhere((u) => u != null)
+      .timeout(const Duration(seconds: 4), onTimeout: () => null);
+  return user != null;
+}
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -109,8 +121,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (mounted) {
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on FirebaseAuthException catch (e) {
       if (mounted) {
@@ -119,9 +130,14 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      // Tolerate the firebase_auth pigeon cast bug.
+      if (await _signedInDespiteError()) {
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: ${e.toString()}')),
+          const SnackBar(content: Text('Login failed. Please try again.')),
         );
       }
     } finally {
@@ -160,13 +176,17 @@ class _LoginScreenState extends State<LoginScreen> {
       await FirebaseAuth.instance.signInWithCredential(credential);
 
       if (mounted) {
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
-      if (mounted) {
+      // Tolerate the firebase_auth pigeon cast bug: proceed if actually signed in.
+      if (await _signedInDespiteError()) {
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Login failed: ${e.toString()}')),
+          const SnackBar(content: Text('Google sign-in failed. Please try again.')),
         );
       }
     } finally {
@@ -340,8 +360,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       if (mounted) {
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } on FirebaseAuthException catch (e) {
       if (mounted) {
@@ -350,9 +369,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      // Tolerate the firebase_auth pigeon cast bug.
+      if (await _signedInDespiteError()) {
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registration failed: ${e.toString()}')),
+          const SnackBar(content: Text('Registration failed. Please try again.')),
         );
       }
     } finally {
@@ -391,13 +415,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await FirebaseAuth.instance.signInWithCredential(credential);
 
       if (mounted) {
-        Navigator.pushReplacement(
-            context, MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
-      if (mounted) {
+      // Tolerate the firebase_auth pigeon cast bug: proceed if actually signed in.
+      if (await _signedInDespiteError()) {
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registration failed: ${e.toString()}')),
+          const SnackBar(content: Text('Google sign-in failed. Please try again.')),
         );
       }
     } finally {

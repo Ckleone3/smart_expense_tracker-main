@@ -17,6 +17,12 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // Developer/owner accounts — keep in sync with kAdminEmails in the app.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email in ['lckipling@gmail.com', 'cheruiyotleonard3@gmail.com'];
+    }
+
     match /users/{userId} {
       // The user document itself.
       allow read, write: if isOwner(userId);
@@ -35,6 +41,25 @@ service cloud.firestore {
       match /summary/{doc}      { allow read, write: if isOwner(userId); }
       match /transactions/{doc} { allow read, write: if isOwner(userId); }
       match /sms_keywords/{doc} { allow read, write: if isOwner(userId); }
+    }
+
+    // Activation keys (device-locked licensing). You create the key docs in the
+    // Firebase console as: licenses/<KEY> { active: true, deviceId: "" }.
+    // A signed-in app may read a key and bind it to one device exactly once;
+    // it can never create, delete, disable, or re-point a key to a new device.
+    match /licenses/{key} {
+      allow read: if request.auth != null;
+
+      // Admin (developer) has full control to generate/manage keys.
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        // A normal signed-in user may bind an UNUSED key to one device only.
+        || (request.auth != null
+            && (!('deviceId' in resource.data) || resource.data.deviceId == ''
+                || resource.data.deviceId == null)
+            && request.resource.data.deviceId is string
+            && request.resource.data.deviceId.size() > 0
+            && request.resource.data.active == resource.data.active);
     }
 
     // NOTE: review the top-level 'expenses' collection used by

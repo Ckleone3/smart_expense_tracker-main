@@ -28,6 +28,7 @@ class BusinessService {
 
   Future<Box<Business>> _open() async {
     if (_box != null && _box!.isOpen) return _box!;
+    await Hive.initFlutter(); // safe to call repeatedly; ensures init in release
     if (!Hive.isAdapterRegistered(12)) {
       Hive.registerAdapter(BusinessAdapter());
     }
