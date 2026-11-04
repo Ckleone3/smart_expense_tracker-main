@@ -8,6 +8,10 @@ import 'package:provider/provider.dart';
 import 'package:smart_expense_tracker/services/subscription_service.dart';
 import 'package:smart_expense_tracker/services/sms_service.dart' as sms;
 import 'package:hive/hive.dart';
+import 'package:smart_expense_tracker/services/google_sheets_service.dart';
+import 'package:smart_expense_tracker/widgets/record_to_sheet_sheet.dart';
+import 'package:smart_expense_tracker/services/business_undo.dart';
+import 'package:smart_expense_tracker/screens/business_records_screen.dart';
 
 class UncategorizedScreen extends StatefulWidget {
   const UncategorizedScreen({super.key});
@@ -410,6 +414,11 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             onPressed: () => _pickDate(context),
           ),
           IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Recorded to business (undo)',
+            onPressed: _openBusinessRecords,
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () async {
               if (_isPremium) {
@@ -424,6 +433,14 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             IconButton(
               icon: const Icon(Icons.select_all),
               onPressed: _selectAll,
+            ),
+            IconButton(
+              icon: const Icon(Icons.business_center),
+              tooltip: 'Record selected to business sheet',
+              onPressed: _selectedTransactionIds.isEmpty
+                  ? null
+                  : () => _recordToBusiness(
+                      List.of(_selectedTransactionIds)),
             ),
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.red),
@@ -699,6 +716,14 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                     onPressed: isCurrentlyCategorizing
                         ? null // Disable edit button while categorizing
                         : () => _categorizeTransaction(id, type, amount, ctxt),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.business_center,
+                        color: Color(0xFF188038)),
+                    tooltip: 'Record to business sheet',
+                    onPressed: isCurrentlyCategorizing
+                        ? null
+                        : () => _recordToBusiness([id]),
                   ),
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
@@ -1133,5 +1158,199 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
         }
       }
     });
+  }
+
+  //
+  // ─── BUSINESS (GOOGLE SHEETS) ─────────────────────────────────────────────────
+  //
+
+  SheetEntry? _entryFor(String id) {
+    for (final t in _transactions) {
+      if (_isPremium) {
+        final doc = t as QueryDocumentSnapshot;
+        if (doc.id != id) continue;
+        final data = doc.data() as Map<String, dynamic>;
+        return SheetEntry(
+          transactionId: (data['transactionId'] as String?) ?? doc.id,
+          date: DateTime.tryParse(data['date'] as String? ?? '') ??
+              DateTime.now(),
+          type: data['type'] as String? ?? 'Unknown',
+          description: data['description'] as String? ?? '',
+          amount: (data['amount'] as num?)?.toDouble() ?? 0,
+          rawSms: data['rawSms'] as String? ?? '',
+        );
+      } else {
+        final tx = t as sms.Transaction;
+        if (tx.transactionId != id) continue;
+        return SheetEntry(
+          transactionId: tx.transactionId,
+          date: DateTime.tryParse(tx.date) ?? DateTime.now(),
+          type: tx.type,
+          description: tx.description,
+          amount: tx.amount,
+          rawSms: tx.rawSms,
+        );
+      }
+    }
+    return null;
+  }
+
+  /// Id of the matching entry in the local SMS store. For free users the list
+  /// shows re-parsed copies whose id can differ from the stored one.
+  String? _localIdFor(String id) {
+    if (_isPremium) return null;
+    for (final t in _transactions) {
+      final tx = t as sms.Transaction;
+      if (tx.transactionId != id) continue;
+      for (final h in _smsService.transactionBox.values) {
+        if (h.rawSms == tx.rawSms && h.date == tx.date) return h.transactionId;
+      }
+    }
+    return null;
+  }
+
+  /// Records the given transactions as rows in a business workbook sheet, then
+  /// marks them as sorted so they leave this list. Offers an Undo.
+  Future<void> _recordToBusiness(List<String> ids) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    // Map sheet-row id (SMS transaction id) back to the list item id.
+    final byEntryId = <String, String>{};
+    final entryById = <String, SheetEntry>{};
+    final localIds = <String, String?>{};
+    for (final id in ids) {
+      final e = _entryFor(id);
+      if (e == null) continue;
+      byEntryId[e.transactionId] = id;
+      entryById[id] = e;
+      localIds[id] = _localIdFor(id);
+    }
+    if (entryById.isEmpty) return;
+
+    final res = await showRecordToSheet(context, entryById.values.toList());
+    if (res == null || !mounted) return;
+
+    // Already-present rows count as recorded too: they're in the sheet.
+    final done = [...res.result.written, ...res.result.duplicates]
+        .map((e) => byEntryId[e])
+        .whereType<String>()
+        .toList();
+    final failed = <String>[];
+    for (final id in done) {
+      var marked = false;
+      try {
+        await _firestore
+            .collection('users')
+            .doc(uid)
+            .collection('transactions')
+            .doc(id)
+            .update({'categoryId': res.categoryLabel});
+        marked = true;
+      } catch (e) {
+        log('Firestore update after sheet record failed for $id: $e');
+      }
+      if (!_isPremium) {
+        try {
+          await _smsService.updateTransactionCategory(
+              localIds[id] ?? id, res.categoryLabel);
+          marked = true;
+        } catch (e) {
+          log('Local update after sheet record failed for $id: $e');
+        }
+      }
+      if (!marked) failed.add(id);
+    }
+
+    // Remember what was written so it can be undone later.
+    final now = DateTime.now();
+    final written = res.result.written.toSet();
+    final records = [
+      for (final id in done)
+        if (written.contains(entryById[id]!.transactionId))
+          BusinessRecord(
+            itemId: id,
+            localId: localIds[id],
+            transactionId: entryById[id]!.transactionId,
+            workbookId: res.workbook.id,
+            workbookName: res.workbook.name,
+            spreadsheetId: res.workbook.spreadsheetId,
+            sheet: res.sheet,
+            description: entryById[id]!.description,
+            amount: entryById[id]!.amount,
+            isIncoming: entryById[id]!.isIncoming,
+            date: entryById[id]!.date,
+            recordedAt: now,
+          )
+    ];
+    await GoogleSheetsService.instance.saveRecords(records);
+
+    if (!mounted) return;
+    setState(() {
+      _transactions.removeWhere((t) {
+        final tid = _isPremium
+            ? (t as QueryDocumentSnapshot).id
+            : (t as sms.Transaction).transactionId;
+        return done.contains(tid) && !failed.contains(tid);
+      });
+      _selectedTransactionIds.removeWhere(done.contains);
+      if (_selectedTransactionIds.isEmpty) _isSelectionMode = false;
+    });
+
+    final w = res.result.written.length, d = res.result.duplicates.length;
+    final parts = <String>[
+      if (w > 0) 'Recorded $w to ${res.workbook.name} › ${res.sheet}',
+      if (d > 0) '$d already in that sheet',
+      if (failed.isNotEmpty) "${failed.length} couldn't be marked as sorted",
+    ];
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(parts.join(' · ')),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 8),
+      action: records.isEmpty
+          ? null
+          : SnackBarAction(
+              label: 'UNDO',
+              onPressed: () => _undoRecords(records),
+            ),
+    ));
+  }
+
+  /// Removes the rows again and brings the transactions back to this list.
+  Future<void> _undoRecords(List<BusinessRecord> records) async {
+    var ok = 0;
+    String? error;
+    for (final r in records) {
+      try {
+        await undoBusinessRecord(r, _smsService);
+        ok++;
+      } catch (e) {
+        error = '$e';
+      }
+    }
+    if (!mounted) return;
+    _showSnackBar(
+        context,
+        error == null
+            ? 'Undone: $ok removed from the sheet and back in To Sort'
+            : "Undo failed${ok > 0 ? ' for some ($ok done)' : ''}: $error. Open Recorded to business to retry.");
+    _reloadList();
+  }
+
+  void _reloadList() {
+    if (_isPremium) {
+      _startListeningToStream();
+    } else {
+      _loadLocalTransactions();
+    }
+  }
+
+  Future<void> _openBusinessRecords() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const BusinessRecordsScreen()),
+    );
+    if (changed == true && mounted) _reloadList();
   }
 }

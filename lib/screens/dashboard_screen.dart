@@ -163,32 +163,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final balance = totalIncome - totalExpense;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F8FB),
+      backgroundColor: const Color(0xFFF1F5F9),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
               slivers: [
                 _buildSliverAppBar(),
                 SliverPadding(
-                  padding: EdgeInsets.fromLTRB(20, 20, 20, bottomInset + 32),
+                  padding: EdgeInsets.fromLTRB(16, 18, 16, bottomInset + 28),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
                       _buildHeroBalanceCard(balance),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
                       _buildIncomeExpenseRow(),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 18),
                       if (totalIncome > 0 || totalExpense > 0) ...[
                         _buildChartSection(),
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 24),
                       ],
                       const Text(
                         'Quick Navigation',
                         style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 17,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF1E293B)),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       _buildQuickNavGrid(),
                       const SizedBox(height: 24),
                     ]),
@@ -201,25 +201,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildSliverAppBar() {
     return SliverAppBar(
-      expandedHeight: 120.0,
+      expandedHeight: 112.0,
       floating: false,
       pinned: true,
       elevation: 0,
-      backgroundColor: const Color(0xFF3F51B5), // Primary color
+      backgroundColor: const Color(0xFF0F172A),
       flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        titlePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         title: const Text(
-          'Good morning!',
+          'Smart Expense Tracker',
           style: TextStyle(
             color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            fontSize: 17,
           ),
         ),
         background: Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF3F51B5), Color(0xFF5C6BC0)],
+              colors: [Color(0xFF0F172A), Color(0xFF134E4A)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -546,7 +546,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _buildGridNavButton(
                 icon: Icons.category,
                 label: 'Categorized',
-                color: const Color(0xFF6366F1), // Indigo
+                color: const Color(0xFF14B8A6),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const CategorizedScreen()),
@@ -562,7 +562,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: _buildGridNavButton(
                 icon: Icons.bar_chart,
                 label: 'Reports',
-                color: const Color(0xFF06B6D4), // Cyan
+                color: const Color(0xFF3B82F6),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const ReportsScreen()),
@@ -597,15 +597,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Ink(
-        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -616,7 +617,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(11),
               ),
               child: Icon(icon, color: color, size: 28),
             ),

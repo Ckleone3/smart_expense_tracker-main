@@ -6,6 +6,7 @@ import 'package:smart_expense_tracker/keyword_settings_screen.dart';
 import 'package:smart_expense_tracker/screens/tutorial_screen.dart';
 import 'package:smart_expense_tracker/screens/subscription_screen.dart';
 import 'package:smart_expense_tracker/screens/ledger_screen.dart';
+import 'package:smart_expense_tracker/screens/business_workbooks_screen.dart';
 import 'package:smart_expense_tracker/screens/privacy_policy_screen.dart';
 import 'package:smart_expense_tracker/screens/admin_license_screen.dart';
 import 'package:smart_expense_tracker/services/license_service.dart';
@@ -62,6 +63,15 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const LedgerScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.table_chart),
+            title: const Text('Business Workbooks'),
+            subtitle: const Text('Google Sheets for recording business transactions'),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BusinessWorkbooksScreen()),
             ),
           ),
           ListTile(
