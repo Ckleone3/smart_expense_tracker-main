@@ -46,7 +46,7 @@ class _BusinessRecordsScreenState extends State<BusinessRecordsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Undo this record?'),
         content: Text(
-            'The row for "${r.description}" will be deleted from ${r.workbookName} › ${r.sheet}, and the transaction will go back to To Sort.'),
+            'The row for "${r.description}" will be deleted from ${r.workbookName} › ${r.sheet}, and the transaction will go back to To Sort${r.personalCategory != null ? ' (also removed from ${r.personalCategory})' : ''}.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -145,7 +145,8 @@ class _BusinessRecordsScreenState extends State<BusinessRecordsScreen> {
                             maxLines: 1, overflow: TextOverflow.ellipsis),
                         subtitle: Text(
                           '${money.format(r.amount)} · ${DateFormat('dd/MM/yyyy HH:mm').format(r.date)}\n'
-                          '${r.workbookName} › ${r.sheet}',
+                          '${r.workbookName} › ${r.sheet}'
+                          '${r.personalCategory != null ? ' · also in ${r.personalCategory}' : ''}',
                         ),
                         isThreeLine: true,
                         trailing: busy

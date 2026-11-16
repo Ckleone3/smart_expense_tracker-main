@@ -72,6 +72,15 @@ class Transaction extends HiveObject {
   }
 }
 
+class _ParsedSms {
+  final Transaction tx;
+
+  /// Id of the message in the local store, unique to this SMS.
+  final String storedId;
+
+  _ParsedSms(this.tx, this.storedId);
+}
+
 class SmsService {
   final smsInbox.SmsQuery _smsQuery = smsInbox.SmsQuery();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -116,6 +125,13 @@ class SmsService {
   static const String _transactionBoxName = 'transactions';
   static const String _lastSyncKey = 'lastSyncTimestamp';
   static const int _batchSize = 500;
+  static const String _backfillKey = 'sms_backfill_v2_done';
+
+  /// A later sync re-reads this far back, so a message that reached the inbox
+  /// late (or after another sync) is still picked up.
+  static const Duration _syncOverlap = Duration(days: 2);
+
+  static List<String> get defaultKeywords => _defaultKeywords;
 
   // ① Expose the box so other widgets/services can read directly:
   Box<Transaction> get transactionBox => _transactionBox;
@@ -160,7 +176,6 @@ class SmsService {
           .doc(userId)
           .collection('sms_keywords')
           .orderBy('timestamp', descending: true)
-          .limit(10)
           .get();
       final userKeywords =
           snapshot.docs.map((doc) => doc['keyword'] as String).toList();
@@ -191,26 +206,76 @@ class SmsService {
       throw Exception('NO_KEYWORDS_AVAILABLE');
     }
 
+    await _loadKeywords(); // The user may have signed in since init().
+
     final lastSync = _transactionBox.get(_lastSyncKey)?.date;
+    final prefs = await SharedPreferences.getInstance();
+    final backfilled = prefs.getBool(_backfillKey) == true;
     int newTransactions = 0;
-    if (lastSync == null) {
-      log('First run - initializing SMS store with all messages');
+    if (lastSync == null || !backfilled) {
+      // First run, or first run since gaps could exist in the store: re-read
+      // the inbox. Messages already stored are skipped.
+      log('Full SMS sync (first run: ${lastSync == null})');
+      final started = DateTime.now();
       newTransactions = await _fullSmsSync();
-      await _transactionBox.put(
-          _lastSyncKey,
-          Transaction(
-            type: 'sync',
-            amount: 0,
-            description: 'Last sync timestamp',
-            date: DateTime.now().toIso8601String(),
-            transactionId: 'sync_key',
-            rawSms: '',
-          ));
-      log('SMS store initialized with $newTransactions new messages');
+      if (await Permission.sms.status.isGranted) {
+        await _markSynced(started);
+        await prefs.setBool(_backfillKey, true);
+      }
+      log('SMS store updated with $newTransactions new messages');
     } else {
       newTransactions = await _incrementalSmsSync(DateTime.parse(lastSync));
     }
     return newTransactions;
+  }
+
+  Future<void> _markSynced(DateTime at) => _transactionBox.put(
+      _lastSyncKey,
+      Transaction(
+        type: 'sync',
+        amount: 0,
+        description: 'Last sync timestamp',
+        date: at.toIso8601String(),
+        transactionId: 'sync_key',
+        rawSms: '',
+      ));
+
+  /// All inbox and sent messages from [cutoff] onwards, reading page by page
+  /// so a busy phone can't push messages past a fixed count.
+  Future<List<smsInbox.SmsMessage>> _readMessagesSince(DateTime cutoff) async {
+    final found = <smsInbox.SmsMessage>[];
+    for (final kind in [smsInbox.SmsQueryKind.inbox, smsInbox.SmsQueryKind.sent]) {
+      var start = 0;
+      while (true) {
+        final page = await _smsQuery.querySms(
+          kinds: [kind],
+          start: start,
+          count: _batchSize,
+        );
+        found.addAll(
+            page.where((m) => m.date != null && !m.date!.isBefore(cutoff)));
+        if (page.length < _batchSize ||
+            page.last.date?.isBefore(cutoff) == true) {
+          break; // Newest first, so everything further is older.
+        }
+        start += _batchSize;
+      }
+    }
+    return found;
+  }
+
+  Future<bool> get hasSmsPermission => Permission.sms.status.isGranted;
+
+  /// Re-reads the inbox for one day and stores anything missing, so a message
+  /// an earlier sync missed still appears. Never prompts for permission.
+  Future<int> syncInboxForDay(DateTime day) async {
+    if (!_isInitialized) await init();
+    if (!await hasSmsPermission) return 0;
+    final start = DateTime(day.year, day.month, day.day);
+    final end = DateTime(day.year, day.month, day.day + 1);
+    final messages = await _readMessagesSince(start);
+    return _saveAllSmsToStore(
+        messages.where((m) => m.date!.isBefore(end)).toList());
   }
 
   Future<int> _fullSmsSync() async {
@@ -221,39 +286,25 @@ class SmsService {
     // Query directly on the main isolate. Passing the SMS plugin across a
     // background isolate (compute) is unreliable in release/AOT builds and
     // silently returned nothing there, so the first-run sync loaded no SMS.
-    final messages = await _smsQuery.querySms(
-      kinds: [smsInbox.SmsQueryKind.inbox, smsInbox.SmsQueryKind.sent],
-      sort: true,
-      count: 2000,
-    );
-
-    final recent = messages
-        .where((msg) => msg.date != null && msg.date!.isAfter(sixMonthsAgo))
-        .toList();
+    final recent = await _readMessagesSince(sixMonthsAgo);
 
     final newCount = await _saveAllSmsToStore(recent);
-    log('Full sync stored $newCount of ${messages.length} fetched messages');
+    log('Full sync stored $newCount of ${recent.length} fetched messages');
     return newCount;
   }
 
   Future<int> _incrementalSmsSync(DateTime lastSyncDate) async {
     if (!await _checkAndRequestSmsPermission()) return 0;
 
-    List<smsInbox.SmsMessage> messages = await _smsQuery.querySms(
-      kinds: [smsInbox.SmsQueryKind.inbox, smsInbox.SmsQueryKind.sent],
-      sort: true,
-      count: _batchSize,
-    );
-
-    final newMessages = messages
-        .where((msg) => msg.date != null && msg.date!.isAfter(lastSyncDate))
-        .toList();
-    if (newMessages.isNotEmpty) {
-      final count = await _saveAllSmsToStore(newMessages);
-      log('Added $count new SMS to store');
-      return count;
-    }
-    return 0;
+    // Taken before reading, so a message arriving during the read is covered
+    // by the next sync.
+    final started = DateTime.now();
+    final messages =
+        await _readMessagesSince(lastSyncDate.subtract(_syncOverlap));
+    final count = await _saveAllSmsToStore(messages);
+    await _markSynced(started);
+    if (count > 0) log('Added $count new SMS to store');
+    return count;
   }
 
   Future<bool> _checkAndRequestSmsPermission() async {
@@ -313,7 +364,8 @@ class SmsService {
       final hiveKey =
           md5.convert(utf8.encode(originalTransactionId)).toString();
 
-      if (!existingIds.contains(originalTransactionId)) {
+      if (!existingIds.contains(originalTransactionId) &&
+          !_transactionBox.containsKey(hiveKey)) {
         final transaction = Transaction(
           type: 'unknown',
           amount: 0,
@@ -329,17 +381,6 @@ class SmsService {
       }
     }
 
-    await _transactionBox.put(
-        _lastSyncKey,
-        Transaction(
-          type: 'sync',
-          amount: 0,
-          description: 'Last sync timestamp',
-          date: DateTime.now().toIso8601String(),
-          transactionId: 'sync_key',
-          rawSms: '',
-          categoryId: null,
-        ));
     return newCount;
   }
 
@@ -365,7 +406,6 @@ class SmsService {
     String fetchType,
     DateTime referenceDate, {
     DateTime? rangeEnd,
-    int limit = 100,
   }) async {
     log('Starting fetchTransactions: fetchType=$fetchType, referenceDate=$referenceDate, rangeEnd=$rangeEnd');
 
@@ -435,14 +475,12 @@ class SmsService {
     }).toList();
 
     // 5. Parse transactions with enhanced logic from Code 2
-    final transactions = allMessages
-        .map((t) => parseTransactionEnhanced(
-            t.rawSms, DateTime.parse(t.date), t.transactionId))
-        .where((t) => t != null)
-        .where((t) => _cachedKeywords
-            .any((kw) => t!.rawSms.toLowerCase().contains(kw.toLowerCase())))
-        .take(limit)
-        .toList();
+    final transactions = <_ParsedSms>[];
+    for (final t in allMessages) {
+      final parsed = parseTransactionEnhanced(
+          t.rawSms, DateTime.parse(t.date), t.transactionId);
+      if (parsed != null) transactions.add(_ParsedSms(parsed, t.transactionId));
+    }
 
     // 6. Sync with Firestore including categoryId and timestamp
     await _syncWithFirestoreEnhanced(transactions);
@@ -455,71 +493,81 @@ class SmsService {
   }
 
   Transaction? parseTransactionEnhanced(
-      String body, DateTime msgDate, String originalTransactionId) {
-    log('Parsing SMS: body=$body');
+          String body, DateTime msgDate, String originalTransactionId) =>
+      parseSms(body, msgDate, originalTransactionId, _cachedKeywords);
 
-    // Exclude non-transactional SMS
-    if (body.toLowerCase().contains('otp') ||
-        body.toLowerCase().contains('password') ||
-        body.toLowerCase().contains('expires in') ||
-        body.toLowerCase().contains('pin') ||
-        body.toLowerCase().contains('verification')) {
-      log('Excluded non-transactional SMS (OTP/verification)');
-      return null;
-    }
+  static final RegExp _sensitiveWords = RegExp(
+      r'\b(otp|password|passcode|pin|verification)\b|expires in',
+      caseSensitive: false);
+  static final RegExp _completedWords = RegExp(
+      r'\b(confirmed|successful|successfully|received|sent|paid|debited|credited|withdrawn|deposited)\b',
+      caseSensitive: false);
+  static final RegExp _currencyAmount = RegExp(
+      r'(?<![A-Za-z])(?:kshs?|kes|shs|usd|ugx|tzs)\.?\s*(\d[\d,]*(?:\.\d{1,2})?)',
+      caseSensitive: false);
+  static final RegExp _bareAmount = RegExp(
+      r'(?<![\w.,/:-])(\d{1,9}(?:,\d{3})*(?:\.\d{1,2})?)(?![\w/:])');
 
-    if (body.toLowerCase().contains('reversal') ||
-        body.toLowerCase().contains('refund')) {
-      log('Excluded reversal/refund');
-      return null;
-    }
-
+  /// Turns an SMS into a transaction, or null if it isn't one.
+  static Transaction? parseSms(String body, DateTime msgDate,
+      String originalTransactionId, List<String> keywords) {
     final lowerBody = body.toLowerCase();
 
     // Check if the SMS contains any user-defined keywords
-    bool hasKeywordMatch = _cachedKeywords
-        .any((keyword) => lowerBody.contains(keyword.toLowerCase()));
+    bool hasKeywordMatch =
+        keywords.any((keyword) => lowerBody.contains(keyword.toLowerCase()));
     if (!hasKeywordMatch) {
       log('No user-defined keyword match found');
       return null;
     }
 
-    // Parse amount using user-defined keywords as potential currency indicators
-    final currencyKeywords = _cachedKeywords
-        .where((k) =>
-            k.length <= 5 && !k.contains(' ')) // Heuristic for currency codes
-        .map((k) => RegExp.escape(k.toLowerCase()))
-        .toList();
-
-    String currencyPattern = currencyKeywords.isNotEmpty
-        ? currencyKeywords.join('|')
-        : r'\w+'; // Fallback
-    RegExp amountRegex = RegExp(
-        r"(?:" + currencyPattern + r")\s*([\d,]+\.?\d{0,2})\b",
-        caseSensitive: false);
-    var amountMatch = amountRegex.firstMatch(body);
-
+    // Find the amount: a currency-marked figure first, then the user's own
+    // short keywords, then any standalone number.
+    Match? amountMatch = _currencyAmount.firstMatch(body);
     if (amountMatch == null) {
-      // Try a fallback: amount without explicit currency prefix if keywords imply it
-      RegExp fallbackAmountRegex = RegExp(r"(\d{1,3}(?:,\d{3})*\.?\d{0,2})\b");
-      amountMatch = fallbackAmountRegex.firstMatch(body);
-      if (amountMatch == null ||
-          !_cachedKeywords.any((k) => lowerBody.contains(k))) {
-        log('No valid amount found with user-defined currency or context');
-        return null;
+      final userCurrencies = keywords
+          .where((k) =>
+              k.length <= 5 &&
+              !k.contains(' ') &&
+              !_defaultKeywords.contains(k.toLowerCase()))
+          .map((k) => RegExp.escape(k.toLowerCase()))
+          .toList();
+      if (userCurrencies.isNotEmpty) {
+        amountMatch = RegExp(
+                r'(?<![A-Za-z])(?:' +
+                    userCurrencies.join('|') +
+                    r')\.?\s*(\d[\d,]*(?:\.\d{1,2})?)',
+                caseSensitive: false)
+            .firstMatch(body);
       }
     }
+    final hasMarkedAmount = amountMatch != null;
 
-    String amountStr = amountMatch.group(1)!.replaceAll(',', '');
-    double? amount;
-    try {
-      amount = double.parse(amountStr);
-    } catch (e) {
-      log('Failed to parse amount "$amountStr": $e');
+    // OTPs and security notices are not transactions, but a real payment
+    // alert may carry a footer like "never share your PIN".
+    if (_sensitiveWords.hasMatch(body) &&
+        !(hasMarkedAmount && _completedWords.hasMatch(body))) {
+      log('Excluded non-transactional SMS (OTP/verification)');
       return null;
     }
 
-    if (amount < 10 && !(lowerBody.contains('airtime') && amount >= 5)) {
+    amountMatch ??= _bareAmount.firstMatch(body);
+    if (amountMatch == null) {
+      log('No valid amount found');
+      return null;
+    }
+
+    final double? amount =
+        double.tryParse(amountMatch.group(1)!.replaceAll(',', ''));
+    if (amount == null || amount <= 0) {
+      log('Invalid amount: ${amountMatch.group(1)}');
+      return null;
+    }
+
+    // An unmarked small number is more likely a count or date than money.
+    if (!hasMarkedAmount &&
+        amount < 10 &&
+        !(lowerBody.contains('airtime') && amount >= 5)) {
       log('Amount too small to be a transaction: $amount');
       return null;
     }
@@ -530,7 +578,8 @@ class SmsService {
       'credited',
       'deposit',
       'added',
-      'salary'
+      'salary',
+      'refund'
     ];
     final expenseKeywords = [
       'sent',
@@ -545,9 +594,9 @@ class SmsService {
     ];
 
     bool hasIncomeKeyword = incomeKeywords
-        .any((k) => lowerBody.contains(k) && _cachedKeywords.contains(k));
+        .any((k) => lowerBody.contains(k) && keywords.contains(k));
     bool hasExpenseKeyword = expenseKeywords
-        .any((k) => lowerBody.contains(k) && _cachedKeywords.contains(k));
+        .any((k) => lowerBody.contains(k) && keywords.contains(k));
 
     String type;
     if (hasExpenseKeyword && !hasIncomeKeyword) {
@@ -595,8 +644,10 @@ class SmsService {
     }
 
     // Parse transaction ID
+    // Must be a whole token with a digit, so plain words ("Transaction
+    // completed", "paid SUPERMARKET") never become an id shared by many SMS.
     RegExp refRegex = RegExp(
-        r'(?:Ref\.?|REF|ID|Transaction|Code|M-Pesa Ref|LOOP Ref)\s*([A-Z0-9]{8,12})',
+        r'\b(?:Ref\.?|ID|Transaction|Code)\s*((?=[A-Z0-9]*\d)[A-Z0-9]{8,12})\b',
         caseSensitive: false);
     var refMatch = refRegex.firstMatch(body);
     String transactionId = originalTransactionId;
@@ -625,62 +676,67 @@ class SmsService {
     return DateTime.now().difference(start) < const Duration(days: 7);
   }
 
+  static String _smsKey(String? date, String? rawSms) => '$date|$rawSms';
+
   // Enhanced Firestore sync function with categoryId and timestamp
-  Future<void> _syncWithFirestoreEnhanced(
-      List<Transaction?> transactions) async {
+  Future<void> _syncWithFirestoreEnhanced(List<_ParsedSms> items) async {
     // only sync to cloud if user is premium OR in trial
     final isPremium = await _subscriptionService.hasPremiumFeatures();
     final inTrial = await _isInTrial(); // if you implemented the trial logic
     if (!isPremium && !inTrial) return;
 
     final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) return;
+    if (userId == null || items.isEmpty) return;
+
+    final col =
+        _firestore.collection('users').doc(userId).collection('transactions');
+
+    // What's already there for these dates: the same SMS is never added twice.
+    final dates = items.map((p) => p.tx.date).toList()..sort();
+    final snapshot = await col
+        .where('date', isGreaterThanOrEqualTo: dates.first)
+        .where('date', isLessThanOrEqualTo: dates.last)
+        .get();
+    final usedIds = <String>{};
+    final seenSms = <String>{};
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      usedIds.add(doc.id);
+      seenSms.add(_smsKey(data['date'] as String?, data['rawSms'] as String?));
+    }
 
     var batch = _firestore.batch();
     const int batchSize = 20;
     int batchCount = 0;
 
-    // Fetch existing transaction IDs to avoid duplicates
-    final existingIds = await _firestore
-        .collection('users')
-        .doc(userId)
-        .collection('transactions')
-        .get()
-        .then((snapshot) => snapshot.docs
-            .map((doc) => doc.data()['transactionId'] as String?)
-            .where((id) => id != null && id.isNotEmpty)
-            .toSet());
+    for (final item in items) {
+      final t = item.tx;
+      if (!seenSms.add(_smsKey(t.date, t.rawSms))) continue;
 
-    for (var transaction in transactions) {
-      if (transaction != null &&
-          !existingIds.contains(transaction.transactionId)) {
-        final docRef = _firestore
-            .collection('users')
-            .doc(userId)
-            .collection('transactions')
-            .doc(transaction
-                .transactionId); // Use transactionId as doc ID for uniqueness
+      // Two different SMS can quote the same reference. Each keeps its own
+      // document, falling back to the id that is unique to the message.
+      var id = t.transactionId;
+      if (id != item.storedId && await _idTaken(col, id, usedIds)) {
+        id = item.storedId;
+      }
+      if (!usedIds.add(id)) continue;
 
-        batch.set(docRef, {
-          'type': transaction.type,
-          'amount': transaction.amount,
-          'description': transaction.description,
-          'date': transaction.date,
-          'rawSms': transaction.rawSms,
-          'transactionId': transaction.transactionId,
-          'categoryId':
-              null, // Added from Code 2, can be updated later via app logic
-          'timestamp': FieldValue.serverTimestamp(), // Added from Code 2
-        });
+      batch.set(col.doc(id), {
+        'type': t.type,
+        'amount': t.amount,
+        'description': t.description,
+        'date': t.date,
+        'rawSms': t.rawSms,
+        'transactionId': id,
+        'categoryId': null, // Added from Code 2, can be updated later via app logic
+        'timestamp': FieldValue.serverTimestamp(), // Added from Code 2
+      });
+      batchCount++;
 
-        existingIds.add(transaction.transactionId);
-        batchCount++;
-
-        if (batchCount >= batchSize) {
-          await batch.commit();
-          batch = _firestore.batch();
-          batchCount = 0;
-        }
+      if (batchCount >= batchSize) {
+        await batch.commit();
+        batch = _firestore.batch();
+        batchCount = 0;
       }
     }
 
@@ -688,7 +744,18 @@ class SmsService {
       await batch.commit();
     }
 
-    log('Synced ${transactions.where((t) => t != null).length} transactions to Firestore');
+    log('Synced ${items.length} transactions to Firestore');
+  }
+
+  Future<bool> _idTaken(CollectionReference<Map<String, dynamic>> col,
+      String id, Set<String> usedIds) async {
+    if (usedIds.contains(id)) return true;
+    try {
+      return (await col.doc(id).get()).exists;
+    } catch (e) {
+      log('Could not check id $id: $e');
+      return true; // Safer than overwriting another transaction.
+    }
   }
 
   Future<void> addKeyword(String keyword) async {

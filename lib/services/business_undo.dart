@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'google_sheets_service.dart';
+import 'personal_category.dart';
 import 'sms_service.dart' as sms;
 
 /// Undoes a business recording: deletes the row from the Google Sheet and puts
@@ -33,7 +34,10 @@ Future<String> undoBusinessRecord(
           .doc(uid)
           .collection('transactions')
           .doc(r.itemId)
-          .update({'categoryId': null});
+          .update({
+        'categoryId': null,
+        if (r.originalType != null) 'type': r.originalType,
+      });
       restored = true;
     } catch (e) {
       log('Undo: Firestore restore skipped for ${r.itemId}: $e');
@@ -42,9 +46,21 @@ Future<String> undoBusinessRecord(
   final localId = r.localId ?? r.itemId;
   try {
     await smsService.updateTransactionCategory(localId, null);
+    if (r.originalType != null) {
+      await setLocalTransactionType(smsService, localId, r.originalType!);
+    }
     restored = true;
   } catch (e) {
     log('Undo: local restore skipped for $localId: $e');
+  }
+
+  // Also recorded into a personal income category: drop its allocations.
+  if (r.personalCategory != null && r.isIncoming) {
+    try {
+      await PersonalCategories.removeAllocations(r.itemId);
+    } catch (e) {
+      log('Undo: allocation cleanup failed for ${r.itemId}: $e');
+    }
   }
 
   await sheets.deleteRecord(r.itemId);
@@ -58,4 +74,28 @@ Future<String> undoBusinessRecord(
   return restored
       ? '$sheetPart · back in To Sort'
       : "$sheetPart · couldn't find the transaction to move back to To Sort";
+}
+
+/// Changes the type of a transaction in the local SMS store.
+Future<void> setLocalTransactionType(
+    sms.SmsService smsService, String transactionId, String type) async {
+  final box = smsService.transactionBox;
+  for (final key in box.keys) {
+    final t = box.get(key);
+    if (t == null || t.transactionId != transactionId) continue;
+    if (t.type == type) return;
+    await box.put(
+      key,
+      sms.Transaction(
+        type: type,
+        amount: t.amount,
+        description: t.description,
+        date: t.date,
+        transactionId: t.transactionId,
+        rawSms: t.rawSms,
+        categoryId: t.categoryId,
+      ),
+    );
+    return;
+  }
 }

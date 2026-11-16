@@ -109,6 +109,12 @@ class BusinessRecord {
   final DateTime date;
   final DateTime recordedAt;
 
+  /// Personal category the transaction was also put in, if any.
+  final String? personalCategory;
+
+  /// Transaction type before recording (restored on undo).
+  final String? originalType;
+
   BusinessRecord({
     required this.itemId,
     this.localId,
@@ -122,6 +128,8 @@ class BusinessRecord {
     required this.isIncoming,
     required this.date,
     required this.recordedAt,
+    this.personalCategory,
+    this.originalType,
   });
 
   Map<String, dynamic> toMap() => {
@@ -137,6 +145,8 @@ class BusinessRecord {
         'isIncoming': isIncoming,
         'date': date.toIso8601String(),
         'recordedAt': recordedAt.toIso8601String(),
+        'personalCategory': personalCategory,
+        'originalType': originalType,
       };
 
   static BusinessRecord? fromMap(Object? v) {
@@ -157,6 +167,8 @@ class BusinessRecord {
       date: DateTime.tryParse(v['date'] as String? ?? '') ?? DateTime.now(),
       recordedAt:
           DateTime.tryParse(v['recordedAt'] as String? ?? '') ?? DateTime.now(),
+      personalCategory: v['personalCategory'] as String?,
+      originalType: v['originalType'] as String?,
     );
   }
 }

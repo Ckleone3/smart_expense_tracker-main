@@ -11,6 +11,7 @@ import 'package:hive/hive.dart';
 import 'package:smart_expense_tracker/services/google_sheets_service.dart';
 import 'package:smart_expense_tracker/widgets/record_to_sheet_sheet.dart';
 import 'package:smart_expense_tracker/services/business_undo.dart';
+import 'package:smart_expense_tracker/services/personal_category.dart';
 import 'package:smart_expense_tracker/screens/business_records_screen.dart';
 
 class UncategorizedScreen extends StatefulWidget {
@@ -23,7 +24,7 @@ class UncategorizedScreen extends StatefulWidget {
 class _UncategorizedScreenState extends State<UncategorizedScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ScrollController _scrollController = ScrollController();
-  static const int _pageSize = 20;
+  static const int _pageSize = 200;
 
   List<dynamic> _transactions = [];
   DocumentSnapshot? _lastDoc;
@@ -63,7 +64,46 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       } else {
         _loadLocalTransactions();
       }
+      _autoSyncSelectedDate();
+      _restoreReversedTransactions();
     });
+  }
+
+  /// Reversing used to label a transaction 'Uncategorized', which hid it from
+  /// both the To Sort and Categorized lists. Puts those back in To Sort.
+  Future<void> _restoreReversedTransactions() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final stuck = await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('transactions')
+          .where('categoryId', isEqualTo: 'Uncategorized')
+          .get();
+      for (final d in stuck.docs) {
+        await d.reference.update({'categoryId': null});
+      }
+      if (stuck.docs.isNotEmpty) log('Restored ${stuck.docs.length} to To Sort');
+    } catch (e) {
+      log('Could not restore reversed transactions: $e');
+    }
+  }
+
+  /// Brings in the selected day's SMS without the user pulling down. Quiet,
+  /// and never asks for SMS permission (the app does that after consent).
+  Future<void> _autoSyncSelectedDate() async {
+    final date = _selectedDate;
+    try {
+      if (!await _smsService.hasSmsPermission) return;
+      await _smsService.syncInboxForDay(date);
+      await _smsService.fetchTransactions('day', date);
+      if (mounted && !_isPremium && date == _selectedDate) {
+        await _loadLocalTransactions();
+      }
+    } catch (e) {
+      log('Auto SMS sync failed for $date: $e');
+    }
   }
 
   void _resetAndReload() {
@@ -246,6 +286,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       } else {
         _loadLocalTransactions();
       }
+      _autoSyncSelectedDate();
     }
   }
 
@@ -258,6 +299,8 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     }
 
     try {
+      // Re-read the inbox too, so anything an earlier sync missed is found.
+      await _smsService.syncInboxForDay(_selectedDate);
       final result = await _smsService.fetchTransactions('day', _selectedDate);
       final parsed = result['parsed']!;
 
@@ -378,6 +421,69 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
         ],
       ),
     );
+  }
+
+  /// "Categorized as …" message with an UNDO that puts it back in To Sort.
+  void _showUndoCategorized(
+      String txId, String localId, String cat, String oldType) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text('Categorized as $cat'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 6),
+      persist: false,
+      showCloseIcon: true,
+      action: SnackBarAction(
+        label: 'UNDO',
+        onPressed: () => _undoCategorize(txId, localId, cat, oldType),
+      ),
+    ));
+  }
+
+  /// Reverses a personal categorization: clears the category, restores the
+  /// type and removes income allocations, then shows it in To Sort again.
+  Future<void> _undoCategorize(
+      String txId, String localId, String cat, String oldType) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    String? error;
+    try {
+      await _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('transactions')
+          .doc(txId)
+          .update({'categoryId': null, 'type': oldType});
+    } catch (e) {
+      log('Undo categorize: Firestore update failed for $txId: $e');
+      if (_isPremium) error = '$e';
+    }
+    if (oldType == 'Income') {
+      try {
+        await PersonalCategories.removeAllocations(txId);
+      } catch (e) {
+        log('Undo categorize: allocation cleanup failed for $txId: $e');
+        error ??= 'allocations not removed: $e';
+      }
+    }
+    if (!_isPremium) {
+      try {
+        await _smsService.updateTransactionCategory(localId, null);
+        await setLocalTransactionType(_smsService, localId, oldType);
+      } catch (e) {
+        log('Undo categorize: local update failed for $txId: $e');
+        error ??= '$e';
+      }
+    }
+    if (!mounted) return;
+    _showSnackBar(
+        context,
+        error == null
+            ? 'Undone: removed from $cat, back in To Sort'
+            : 'Undo failed: $error');
+    _reloadList();
   }
 
   void _showSnackBar(BuildContext ctx, String msg) {
@@ -821,6 +927,8 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
               return ListTile(
                 title: Text(cat),
                 onTap: () async {
+                  // The list can show a different id than the local store.
+                  final localId = _localIdFor(txId) ?? txId;
                   // Show loading indicator
                   setState(() {
                     _isCategorizing = true;
@@ -849,17 +957,22 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
                         .collection('transactions')
                         .doc(txId)
                         .update(updateData);
-                    _showSnackBar(context, 'Categorized as $cat');
+                    // Split income across expense categories only once it is
+                    // actually categorized (not when the dialog is cancelled).
+                    if (type == 'Income') {
+                      await _allocateIncome(txId, amount, uid);
+                    }
+                    _showUndoCategorized(txId, localId, cat, type);
                     
                     // Update local storage immediately for free users
                     if (!_isPremium) {
                       try {
                         // Update local transaction with new categoryId and type
-                        await _smsService.updateTransactionCategory(txId, cat);
+                        await _smsService.updateTransactionCategory(localId, cat);
                         
                         // If it was an Unknown transaction, also update the type locally
                         if (type == 'Unknown') {
-                          await _updateLocalTransactionType(txId, cat);
+                          await _updateLocalTransactionType(localId, cat);
                         }
                         
                         // Update the transaction in the current list without full refresh
@@ -921,7 +1034,6 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             ctxt, 'Expense categories must total 100% to categorize income.');
         return;
       }
-      await _allocateIncome(txId, amount, uid);
     }
 
     _showCategoryDialog(
@@ -1236,7 +1348,13 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
         .whereType<String>()
         .toList();
     final failed = <String>[];
+    final personal = res.personalCategory;
+    final personalType = res.income ? 'Income' : 'Expense';
+    // Original type of entries whose type gets set by the personal category.
+    final typeChanged = <String, String>{};
     for (final id in done) {
+      final oldType = entryById[id]!.type;
+      if (personal != null && oldType != personalType) typeChanged[id] = oldType;
       var marked = false;
       try {
         await _firestore
@@ -1244,21 +1362,36 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             .doc(uid)
             .collection('transactions')
             .doc(id)
-            .update({'categoryId': res.categoryLabel});
+            .update({
+          'categoryId': res.categoryLabel,
+          if (typeChanged.containsKey(id)) 'type': personalType,
+        });
         marked = true;
       } catch (e) {
         log('Firestore update after sheet record failed for $id: $e');
       }
       if (!_isPremium) {
         try {
+          final localId = localIds[id] ?? id;
           await _smsService.updateTransactionCategory(
-              localIds[id] ?? id, res.categoryLabel);
+              localId, res.categoryLabel);
+          if (typeChanged.containsKey(id)) {
+            await setLocalTransactionType(_smsService, localId, personalType);
+          }
           marked = true;
         } catch (e) {
           log('Local update after sheet record failed for $id: $e');
         }
       }
-      if (!marked) failed.add(id);
+      if (!marked) {
+        failed.add(id);
+      } else if (personal != null && res.income) {
+        try {
+          await PersonalCategories.allocateIncome(id, entryById[id]!.amount);
+        } catch (e) {
+          log('Income allocation failed for $id: $e');
+        }
+      }
     }
 
     // Remember what was written so it can be undone later.
@@ -1280,6 +1413,8 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
             isIncoming: entryById[id]!.isIncoming,
             date: entryById[id]!.date,
             recordedAt: now,
+            personalCategory: personal,
+            originalType: typeChanged[id],
           )
     ];
     await GoogleSheetsService.instance.saveRecords(records);
@@ -1299,6 +1434,7 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
     final w = res.result.written.length, d = res.result.duplicates.length;
     final parts = <String>[
       if (w > 0) 'Recorded $w to ${res.workbook.name} › ${res.sheet}',
+      if (personal != null && done.length > failed.length) 'also in $personal',
       if (d > 0) '$d already in that sheet',
       if (failed.isNotEmpty) "${failed.length} couldn't be marked as sorted",
     ];
@@ -1308,6 +1444,9 @@ class _UncategorizedScreenState extends State<UncategorizedScreen> {
       content: Text(parts.join(' · ')),
       behavior: SnackBarBehavior.floating,
       duration: const Duration(seconds: 8),
+      // Snack bars with an action stay up by default; let this one time out.
+      persist: false,
+      showCloseIcon: true,
       action: records.isEmpty
           ? null
           : SnackBarAction(

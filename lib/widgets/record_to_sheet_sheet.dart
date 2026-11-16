@@ -4,15 +4,28 @@ import 'package:intl/intl.dart';
 
 import '../screens/business_workbooks_screen.dart';
 import '../services/google_sheets_service.dart';
+import '../services/personal_category.dart';
 
 class RecordToSheetResult {
   final BusinessWorkbook workbook;
   final String sheet;
   final AppendResult result;
-  RecordToSheetResult(this.workbook, this.sheet, this.result);
+
+  /// Personal category to also put the transactions in, if chosen.
+  final String? personalCategory;
+
+  /// True if the transactions are income (decides how [personalCategory]
+  /// is applied).
+  final bool income;
+
+  RecordToSheetResult(this.workbook, this.sheet, this.result,
+      {this.personalCategory, this.income = false});
+
+  /// Business label used when the transaction is only recorded to the sheet.
+  String get businessLabel => '$kBusinessCategoryPrefix ${workbook.name} › $sheet';
 
   /// Value stored as the transaction's categoryId once recorded.
-  String get categoryLabel => '$kBusinessCategoryPrefix ${workbook.name} › $sheet';
+  String get categoryLabel => personalCategory ?? businessLabel;
 }
 
 /// Bottom sheet that lets the user pick a workbook and a worksheet, then
@@ -51,6 +64,20 @@ class _RecordToSheetState extends State<_RecordToSheet> {
   bool _loadingSheets = false;
   bool _saving = false;
   String? _error;
+
+  // Also record into a personal (Firestore) category.
+  bool _alsoPersonal = false;
+  bool _loadingCats = false;
+  List<String> _cats = [];
+  String? _cat;
+
+  /// True if all entries are income, false if all are expenses, null if mixed.
+  late final bool? _allIncome = () {
+    final kinds = widget.entries.map((e) => e.isIncoming).toSet();
+    return kinds.length == 1 ? kinds.first : null;
+  }();
+
+  String get _catType => _allIncome == true ? 'Income' : 'Expense';
 
   @override
   void initState() {
@@ -176,14 +203,51 @@ class _RecordToSheetState extends State<_RecordToSheet> {
     }
   }
 
+  Future<void> _togglePersonal(bool on) async {
+    setState(() {
+      _alsoPersonal = on;
+      _error = null;
+    });
+    if (!on || _cats.isNotEmpty) return;
+    setState(() => _loadingCats = true);
+    try {
+      final list = await PersonalCategories.names(_catType);
+      if (!mounted) return;
+      setState(() {
+        _cats = list;
+        if (list.length == 1) _cat = list.first;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not load your categories: $e');
+    } finally {
+      if (mounted) setState(() => _loadingCats = false);
+    }
+  }
+
   Future<void> _record() async {
     final wb = _workbook, sheet = _sheet;
     if (wb == null || sheet == null) return;
+    final personal = _alsoPersonal ? _cat : null;
+    if (_alsoPersonal && personal == null) {
+      setState(() => _error = 'Pick one of your categories, or turn off '
+          '"Also save to my categories".');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
     });
     try {
+      // Check the personal category first so nothing is written if it fails.
+      if (personal != null) {
+        final total = widget.entries.fold<double>(0, (s, e) => s + e.amount);
+        final problem = await PersonalCategories.check(
+            income: _allIncome == true, category: personal, total: total);
+        if (problem != null) {
+          if (mounted) setState(() => _error = problem);
+          return;
+        }
+      }
       final result = await _svc.append(
         wb.spreadsheetId,
         sheet,
@@ -194,7 +258,10 @@ class _RecordToSheetState extends State<_RecordToSheet> {
       );
       await _svc.rememberLast(wb.id, sheet);
       if (mounted) {
-        Navigator.pop(context, RecordToSheetResult(wb, sheet, result));
+        Navigator.pop(
+            context,
+            RecordToSheetResult(wb, sheet, result,
+                personalCategory: personal, income: _allIncome == true));
       }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -211,6 +278,126 @@ class _RecordToSheetState extends State<_RecordToSheet> {
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
+  }
+
+  static const _sheetGreen = Color(0xFF188038);
+
+  Widget _buildSheetList(ThemeData theme, List<String> sheets) {
+    final scheme = theme.colorScheme;
+    final maxHeight = MediaQuery.of(context).size.height * 0.38;
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: sheets.isEmpty
+          ? Padding(
+              padding: const EdgeInsets.all(20),
+              child: Center(
+                child: Text('No sheets match "${_filter.text.trim()}"',
+                    style: TextStyle(color: scheme.onSurfaceVariant)),
+              ),
+            )
+          : ListView.separated(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              itemCount: sheets.length,
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: scheme.outlineVariant),
+              itemBuilder: (_, i) {
+                final name = sheets[i];
+                final selected = name == _sheet;
+                final lastUsed = name == _lastSheet;
+                return Material(
+                  color: selected
+                      ? scheme.primaryContainer.withValues(alpha: 0.6)
+                      : Colors.transparent,
+                  child: ListTile(
+                    dense: true,
+                    enabled: !_saving,
+                    leading: Icon(Icons.grid_on,
+                        color: selected ? scheme.primary : _sheetGreen),
+                    title: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                    subtitle: lastUsed ? const Text('Last used') : null,
+                    trailing: Icon(
+                      selected
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      color: selected ? scheme.primary : scheme.outline,
+                    ),
+                    onTap: () => setState(() => _sheet = name),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildPersonalSection(ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final mixed = _allIncome == null;
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+            color: _alsoPersonal ? scheme.primary : scheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SwitchListTile(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            secondary: Icon(Icons.category_outlined,
+                color: _alsoPersonal ? scheme.primary : null),
+            title: const Text('Also save to my categories'),
+            subtitle: Text(mixed
+                ? 'Select only income or only expenses to use this'
+                : 'Keeps it in your personal $_catType records too'),
+            value: _alsoPersonal && !mixed,
+            onChanged: mixed || _saving ? null : _togglePersonal,
+          ),
+          if (_alsoPersonal && !mixed)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: _loadingCats
+                  ? const LinearProgressIndicator()
+                  : _cats.isEmpty
+                      ? Text(
+                          'No $_catType categories yet. Add some in Settings.',
+                          style: TextStyle(color: scheme.onSurfaceVariant))
+                      : Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final c in _cats)
+                              ChoiceChip(
+                                label: Text(c),
+                                selected: c == _cat,
+                                onSelected: _saving
+                                    ? null
+                                    : (_) => setState(() {
+                                          _cat = c;
+                                          _error = null;
+                                        }),
+                              ),
+                          ],
+                        ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -267,20 +454,42 @@ class _RecordToSheetState extends State<_RecordToSheet> {
                 label: const Text('Link a Google Sheets workbook'),
               )
             else
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              Row(
                 children: [
-                  for (final w in _workbooks)
-                    ChoiceChip(
-                      avatar: const Icon(Icons.table_chart, size: 18),
-                      label: Text(w.name),
-                      selected: _workbook?.id == w.id,
-                      onSelected: _saving ? null : (_) => _selectWorkbook(w),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      // Re-keyed so a newly linked workbook shows as selected.
+                      key: ValueKey('${_workbook?.id}-${_workbooks.length}'),
+                      initialValue: _workbook?.id,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        prefixIcon:
+                            const Icon(Icons.table_chart, color: _sheetGreen),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 12),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      items: [
+                        for (final w in _workbooks)
+                          DropdownMenuItem(
+                            value: w.id,
+                            child:
+                                Text(w.name, overflow: TextOverflow.ellipsis),
+                          ),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (id) {
+                              final w = _workbooks.firstWhere((w) => w.id == id);
+                              if (w.id != _workbook?.id) _selectWorkbook(w);
+                            },
                     ),
-                  ActionChip(
-                    avatar: const Icon(Icons.add, size: 18),
-                    label: const Text('Link'),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.outlined(
+                    tooltip: 'Link another workbook',
+                    icon: const Icon(Icons.add_link),
                     onPressed: _saving ? null : _addWorkbook,
                   ),
                 ],
@@ -291,8 +500,14 @@ class _RecordToSheetState extends State<_RecordToSheet> {
               const SizedBox(height: 20),
               Row(
                 children: [
-                  Expanded(
-                      child: Text('Sheet', style: theme.textTheme.titleSmall)),
+                  Text('Sheet', style: theme.textTheme.titleSmall),
+                  if (_sheets.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text('(${_sheets.length})',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant)),
+                  ],
+                  const Spacer(),
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     tooltip: 'Reload sheets',
@@ -301,46 +516,51 @@ class _RecordToSheetState extends State<_RecordToSheet> {
                         ? null
                         : () => _selectWorkbook(_workbook!),
                   ),
+                  if (_error == null)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact),
+                      onPressed: _saving || _loadingSheets ? null : _newSheet,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('New'),
+                    ),
                 ],
               ),
-              if (_sheets.length > 8) ...[
-                TextField(
-                  controller: _filter,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    prefixIcon: Icon(Icons.search),
-                    hintText: 'Find a sheet',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
+              const SizedBox(height: 8),
               if (_loadingSheets)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: LinearProgressIndicator(),
                 )
-              else
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final s in visibleSheets)
-                      ChoiceChip(
-                        label: Text(s),
-                        selected: _sheet == s,
-                        onSelected:
-                            _saving ? null : (_) => setState(() => _sheet = s),
-                      ),
-                    if (_error == null)
-                      ActionChip(
-                        avatar: const Icon(Icons.add, size: 18),
-                        label: const Text('New sheet'),
-                        onPressed: _saving ? null : _newSheet,
-                      ),
-                  ],
-                ),
+              else if (_sheets.isNotEmpty) ...[
+                if (_sheets.length > 5) ...[
+                  TextField(
+                    controller: _filter,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: 'Search ${_sheets.length} sheets',
+                      suffixIcon: _filter.text.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () =>
+                                  setState(() => _filter.clear()),
+                            ),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                _buildSheetList(theme, visibleSheets),
+              ],
+            ],
+
+            if (_workbook != null && !_loadingWorkbooks) ...[
+              const SizedBox(height: 16),
+              _buildPersonalSection(theme),
             ],
 
             if (_error != null) ...[
@@ -372,9 +592,14 @@ class _RecordToSheetState extends State<_RecordToSheet> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
                     : const Icon(Icons.upload),
-                label: Text(_sheet == null
-                    ? 'Choose a sheet'
-                    : 'Record to "$_sheet"'),
+                label: Text(
+                  _sheet == null
+                      ? 'Choose a sheet'
+                      : _alsoPersonal && _cat != null
+                          ? 'Record to "$_sheet" + $_cat'
+                          : 'Record to "$_sheet"',
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             if (_svc.signedInEmail != null)

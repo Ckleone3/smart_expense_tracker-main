@@ -1160,13 +1160,13 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                                 );
                                 if (confirm != true) return;
                                 try {
-                                  // Set categoryId to 'Uncategorized'
+                                  // Clearing the category puts it back in To Sort.
                                   await FirebaseFirestore.instance
                                       .collection('users')
                                       .doc(userId)
                                       .collection('transactions')
                                       .doc(transaction.id)
-                                      .update({'categoryId': 'Uncategorized'});
+                                      .update({'categoryId': null});
                                   // Remove allocations for this transaction
                                   final allocs = await FirebaseFirestore
                                       .instance
@@ -1183,7 +1183,7 @@ class _CategorizedScreenState extends State<CategorizedScreen>
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
                                           content:
-                                              Text('Transaction reversed.')),
+                                              Text('Transaction moved back to To Sort.')),
                                     );
                                     setState(() {});
                                   }
